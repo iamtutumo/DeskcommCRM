@@ -702,15 +702,6 @@ generate_jwt() {
   sig="$(printf '%s.%s' "$h_b64" "$p_b64" | openssl dgst -sha256 -hmac "$secret" -binary | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')"
   printf '%s.%s.%s' "$h_b64" "$p_b64" "$sig"
 }
-if [ -z "${NEXT_PUBLIC_SUPABASE_URL:-}" ]; then
-    export SB_PG_PASS="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32 || echo 'DeskcommPgSecret2026Secure')"
-    export JWT_SECRET="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 40 || echo 'DeskcommJwtSecretTokenWithAtLeast32CharsLong2026')"
-    export NEXT_PUBLIC_SUPABASE_ANON_KEY="$(generate_jwt "anon" "$JWT_SECRET")"
-    export SUPABASE_SERVICE_ROLE_KEY="$(generate_jwt "service_role" "$JWT_SECRET")"
-    export NEXT_PUBLIC_SUPABASE_URL="https://${DOMAIN}/supabase"
-    export SUPABASE_DB_URL="postgresql://postgres:${SB_PG_PASS}@supabase-db:5432/postgres"
-    export SELF_HOSTED_SUPABASE=true
-fi
 
 step "Configuration"
 # Se já existe .env, carrega pra não repetir perguntas (idempotência).
@@ -1063,6 +1054,20 @@ fi
 # Derivados
 NEXT_PUBLIC_APP_URL="https://${DOMAIN}"
 NEXT_PUBLIC_ADMIN_URL="https://${DOMAIN}"
+# Auto-generate Self-Hosted Supabase Credentials. Roda AQUI — e não no topo da
+# fase 2 — porque usa $DOMAIN, que só existe depois da entrevista de config.
+# Antes ele rodava antes das perguntas e, com `set -u`, uma instalação nova
+# (sem .env) morria em "DOMAIN: unbound variable" logo na fase 2.
+if [ -z "${NEXT_PUBLIC_SUPABASE_URL:-}" ]; then
+    export SB_PG_PASS="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32 || echo 'DeskcommPgSecret2026Secure')"
+    export JWT_SECRET="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 40 || echo 'DeskcommJwtSecretTokenWithAtLeast32CharsLong2026')"
+    export NEXT_PUBLIC_SUPABASE_ANON_KEY="$(generate_jwt \"anon\" "$JWT_SECRET")"
+    export SUPABASE_SERVICE_ROLE_KEY="$(generate_jwt \"service_role\" "$JWT_SECRET")"
+    export NEXT_PUBLIC_SUPABASE_URL="https://${DOMAIN}/supabase"
+    export SUPABASE_DB_URL="postgresql://postgres:${SB_PG_PASS}@supabase-db:5432/postgres"
+    export SELF_HOSTED_SUPABASE=true
+fi
+
 
 # ── 4. Geração de segredos (idempotente: só gera o que falta) ────────────────
 step "Gerando segredos"
@@ -1081,6 +1086,10 @@ gen_b64() { openssl rand -base64 32; }
 : "${WAHA_API_KEY:=$(gen_hex)}"
 # O container WAHA espera o HASH SHA512 hex; o app envia o plaintext no X-Api-Key.
 WAHA_API_KEY_SHA512="$(printf '%s' "$WAHA_API_KEY" | openssl dgst -sha512 -hex | awk '{print $NF}')"
+# Evolution API (WhatsApp engine — substitui o WAHA no compose).
+: "${EVOLUTION_API_KEY:=$(gen_hex)}"
+: "${EVOLUTION_API_URL:=http://evolution-api:8080}"
+: "${EVOLUTION_INSTANCE_NAME:=deskcomm-instance}"
 UPSTASH_REDIS_REST_TOKEN="$SRH_TOKEN"
 c_grn "✓ segredos prontos"
 
@@ -1285,6 +1294,12 @@ fi
   envq WAHA_WEBHOOK_REQUIRE_SIGNATURE "${WAHA_WEBHOOK_REQUIRE_SIGNATURE:-false}"
   envq WAHA_IMAGE "${WAHA_IMAGE:-devlikeapro/waha}"
   envq WAHA_DEFAULT_ENGINE "${WAHA_DEFAULT_ENGINE:-NOWEB}"
+  # Evolution API (WhatsApp engine do compose — substitui o WAHA).
+  envq EVOLUTION_API_URL "$EVOLUTION_API_URL"
+  envq EVOLUTION_API_KEY "$EVOLUTION_API_KEY"
+  envq EVOLUTION_INSTANCE_NAME "$EVOLUTION_INSTANCE_NAME"
+  # Webhook da Evolution aponta pro app na rede do compose.
+  envq EVOLUTION_WEBHOOK_BASE_URL "${EVOLUTION_WEBHOOK_BASE_URL:-http://app:3000}"
   envq UPSTASH_REDIS_REST_URL "http://srh:80"
   envq UPSTASH_REDIS_REST_TOKEN "$UPSTASH_REDIS_REST_TOKEN"
   envq SRH_TOKEN "$SRH_TOKEN"

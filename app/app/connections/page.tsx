@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
+import { activeQrTransport } from "@/lib/channels/transport";
 import { ConexoesShell } from "@/components/connections/ConexoesShell";
 
 export const dynamic = "force-dynamic";
@@ -14,10 +15,7 @@ export default async function ConnectionsPage() {
     redirect("/403");
   }
 
-  const key = process.env.WAHA_API_KEY;
-  const wahaConfigured = Boolean(
-    process.env.WAHA_API_BASE_URL && key && key !== "dev_plaintext_change_me",
-  );
+  const wahaConfigured = activeQrTransport() !== null;
 
   return (
     <div className="flex h-full flex-col gap-6 p-6">

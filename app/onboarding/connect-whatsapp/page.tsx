@@ -1,6 +1,6 @@
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { redirect } from "next/navigation";
-import { getWahaClient } from "@/lib/waha/client";
+import { activeQrTransport } from "@/lib/channels/transport";
 import { ConnectWhatsappClient } from "./_client";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ export default async function ConnectWhatsappPage() {
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) redirect("/login");
 
-  const wahaConfigured = getWahaClient() !== null;
+  const wahaConfigured = activeQrTransport() !== null;
   // We don't try to start the session at SSR — client kicks off the call
   // (and shows graceful banner if WAHA is not reachable).
 

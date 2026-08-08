@@ -31,6 +31,18 @@ export const CHANNEL_CAPABILITIES: Record<ChannelProvider, ChannelCapabilities> 
     groups: "limited",
     costPerMessage: true,
   },
+  // Mesmo perfil do WAHA: é outro engine Baileys self-hosted — liberdade com
+  // risco de banimento. (Grupos saem "full" no catálogo, mas o adapter atual
+  // não endereça grupo ainda — ver resolveRecipient em adapters/evolution.ts.)
+  evolution: {
+    freeformOutsideWindow: true,
+    requiresTemplates: false,
+    banRisk: true,
+    minIntervalMs: null,
+    voiceNote: "server-convert",
+    groups: "full",
+    costPerMessage: false,
+  },
 };
 
 /**
@@ -51,6 +63,7 @@ export const DEFAULT_CHANNEL_PROVIDER: ChannelProvider = "waha";
  */
 export const CHANNEL_PROVIDER_WAHA: ChannelProvider = "waha";
 export const CHANNEL_PROVIDER_META: ChannelProvider = "meta_cloud";
+export const CHANNEL_PROVIDER_EVOLUTION: ChannelProvider = "evolution";
 
 export function capabilitiesOf(provider: ChannelProvider): ChannelCapabilities {
   const caps = CHANNEL_CAPABILITIES[provider];

@@ -38,8 +38,9 @@ import { nomeiaProvider } from "./lint-channels.pattern";
 const ROOTS = ["app", "lib", "components", "workers"];
 const ALLOWED = [
   /^lib\/channels\//,
-  // O transporte que o adapter embrulha; some quando a Fase 3 o absorver.
+  // Os transportes que os adapters embrulham; somem quando a Fase 3 os absorver.
   /^lib\/waha\//,
+  /^lib\/evolution\//,
   // Saída de `supabase gen types`: os nomes são COLUNAS. Editar à mão é o defeito.
   /^lib\/database\.types\.ts$/,
 ];

@@ -199,15 +199,29 @@ export async function startWorker(
     loopsAbort.signal,
   );
 
-  // Watchdog de sessão (4A-2): reconcilia channel_sessions×WAHA + redrive de
-  // queued. Liga só com as credenciais do WAHA no env (sem elas: warn + off).
+  // Watchdog de sessão (4A-2): reconcilia channel_sessions×transporte + redrive
+  // de queued. Liga com as credenciais de PELO MENOS um transporte no env
+  // (WAHA e/ou Evolution); sem nenhum: warn + off.
+  const temWaha = env.WAHA_API_BASE_URL !== undefined && env.WAHA_API_KEY !== undefined;
+  const temEvolution =
+    env.EVOLUTION_API_URL !== undefined && env.EVOLUTION_API_KEY !== undefined;
   const sessionWatchdogLoop =
-    env.WAHA_API_BASE_URL !== undefined && env.WAHA_API_KEY !== undefined
+    temWaha || temEvolution
       ? runSessionWatchdogLoop(
           pool,
           {
-            wahaBaseUrl: env.WAHA_API_BASE_URL,
-            wahaApiKey: env.WAHA_API_KEY,
+            ...(temWaha
+              ? { waha: { baseUrl: env.WAHA_API_BASE_URL!, apiKey: env.WAHA_API_KEY! } }
+              : {}),
+            ...(temEvolution
+              ? {
+                  evolution: {
+                    baseUrl: env.EVOLUTION_API_URL!,
+                    apiKey: env.EVOLUTION_API_KEY!,
+                    instanceName: env.EVOLUTION_INSTANCE_NAME,
+                  },
+                }
+              : {}),
             intervalMs: env.WATCHDOG_INTERVAL_MS,
             redriveMinAgeMs: env.WATCHDOG_REDRIVE_MIN_AGE_MS,
             redriveBatchSize: env.WATCHDOG_REDRIVE_BATCH_SIZE,
@@ -216,7 +230,10 @@ export async function startWorker(
           log,
           loopsAbort.signal,
         )
-      : (log.warn('watchdog de sessão OFF — WAHA_API_BASE_URL/WAHA_API_KEY ausentes no env', {}),
+      : (log.warn(
+          'watchdog de sessão OFF — sem credenciais de transporte (WAHA ou Evolution) no env',
+          {},
+        ),
         Promise.resolve());
 
   // Circuito de saúde do número (block/response rate → hold).

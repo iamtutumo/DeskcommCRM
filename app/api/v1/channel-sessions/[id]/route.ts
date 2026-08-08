@@ -24,7 +24,9 @@ import { audit } from "@/lib/audit";
 import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
-import { CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
+import { CHANNEL_PROVIDER_EVOLUTION, CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
+import { evolutionStateToChannelStatus } from "@/lib/channels/transport";
+import { getEvolutionClient } from "@/lib/evolution";
 import { isChannelStatus } from "@/lib/schemas/channels";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -134,7 +136,7 @@ export async function GET(
   const supabase = await createClient();
   const { data: session } = await supabase
     .from("channel_sessions")
-    .select("id, provider, waha_session_name, display_name, phone_number, status")
+    .select("id, provider, waha_session_name, evolution_session_name, display_name, phone_number, status")
     .eq("organization_id", activeOrg.orgId)
     .eq("id", id)
     .maybeSingle();
@@ -147,33 +149,57 @@ export async function GET(
   const comImpacto = <T extends object>(corpo: T): T & { deletion_impact?: ChannelDeletionImpact } =>
     impact ? { ...corpo, deletion_impact: impact } : corpo;
 
-  const waha = getWahaClient();
-  // Canal oficial não tem sessão no transporte para consultar — `waha_session_name`
+  // Canal oficial não tem sessão no transporte para consultar — o nome de sessão
   // é NULL nele por CHECK, e perguntar assim mesmo pediria `/api/sessions/null`.
   const nomeSessao =
-    session.provider === CHANNEL_PROVIDER_WAHA ? session.waha_session_name : null;
-  if (!waha || !nomeSessao) {
-    // Nada a checar ao vivo (transporte fora do ar, ou canal que não vive nele):
-    // devolve o que está no DB, sinalizando que o estado não foi confirmado agora.
-    return ok(comImpacto({ ...session, waha_configured: false }), { requestId });
-  }
+    session.provider === CHANNEL_PROVIDER_EVOLUTION
+      ? session.evolution_session_name
+      : session.provider === CHANNEL_PROVIDER_WAHA
+        ? session.waha_session_name
+        : null;
 
   let liveStatus = session.status as string;
   let phoneNumber = session.phone_number as string | null;
-  try {
-    const remote = (await waha.getSessionQr(nomeSessao)) as {
-      status?: string;
-      me?: { id?: string; pushName?: string };
-    };
-    if (remote.status) liveStatus = remote.status;
-    // WAHA expõe o número (JID `<phone>@c.us`) quando a sessão está WORKING.
-    const jid = remote.me?.id;
-    if (jid && !phoneNumber) phoneNumber = jid.replace(/@.*/, "");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "unknown";
-    // 404 no WAHA = sessão não iniciada lá → considera STOPPED.
-    if (msg.includes("404")) liveStatus = "STOPPED";
-    // outros erros: mantém o status do DB (não sobrescreve com ruído transitório).
+  if (session.provider === CHANNEL_PROVIDER_EVOLUTION) {
+    const client = getEvolutionClient();
+    if (!client || !nomeSessao) {
+      // Nada a checar ao vivo (transporte fora do ar, ou canal que não vive nele):
+      // devolve o que está no DB, sinalizando que o estado não foi confirmado agora.
+      return ok(comImpacto({ ...session, waha_configured: false }), { requestId });
+    }
+    try {
+      const remote = await client.getInstanceStatus(nomeSessao);
+      liveStatus = evolutionStateToChannelStatus(remote.instance?.state);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown";
+      // 404 na Evolution = instância não criada → STOPPED (mesmo contrato do WAHA).
+      if (msg.includes("404")) liveStatus = "STOPPED";
+    }
+  } else if (session.provider === CHANNEL_PROVIDER_WAHA) {
+    const waha = getWahaClient();
+    if (!waha || !nomeSessao) {
+      // Nada a checar ao vivo (transporte fora do ar, ou canal que não vive nele):
+      // devolve o que está no DB, sinalizando que o estado não foi confirmado agora.
+      return ok(comImpacto({ ...session, waha_configured: false }), { requestId });
+    }
+    try {
+      const remote = (await waha.getSessionQr(nomeSessao)) as {
+        status?: string;
+        me?: { id?: string; pushName?: string };
+      };
+      if (remote.status) liveStatus = remote.status;
+      // WAHA expõe o número (JID `<phone>@c.us`) quando a sessão está WORKING.
+      const jid = remote.me?.id;
+      if (jid && !phoneNumber) phoneNumber = jid.replace(/@.*/, "");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown";
+      // 404 no WAHA = sessão não iniciada lá → considera STOPPED.
+      if (msg.includes("404")) liveStatus = "STOPPED";
+      // outros erros: mantém o status do DB (não sobrescreve com ruído transitório).
+    }
+  } else {
+    // Canal oficial: nada a checar ao vivo.
+    return ok(comImpacto({ ...session, waha_configured: false }), { requestId });
   }
 
   // Sincroniza o DB: sempre carimba o health check; atualiza status/telefone só se válido.
@@ -213,7 +239,9 @@ export async function GET(
   return ok(
     comImpacto({
       id: session.id,
+      provider: session.provider,
       waha_session_name: session.waha_session_name,
+      evolution_session_name: session.evolution_session_name,
       display_name: session.display_name,
       phone_number: phoneNumber,
       status: liveStatus,
@@ -284,7 +312,7 @@ export async function DELETE(
   const supabase = await createClient();
   const { data: session } = await supabase
     .from("channel_sessions")
-    .select("id, provider, waha_session_name, display_name, phone_number")
+    .select("id, provider, waha_session_name, evolution_session_name, display_name, phone_number")
     .eq("organization_id", activeOrg.orgId)
     .eq("id", id)
     .maybeSingle();
@@ -300,7 +328,23 @@ export async function DELETE(
     last_status_change_at: now,
   };
 
-  if (session.provider === CHANNEL_PROVIDER_WAHA) {
+  if (session.provider === CHANNEL_PROVIDER_EVOLUTION) {
+    const client = getEvolutionClient();
+    if (!client) {
+      return fail(
+        "evolution_not_configured",
+        "A Evolution API não está configurada neste ambiente (faltam EVOLUTION_API_URL e/ou EVOLUTION_API_KEY) — sem ela o número não pode ser desconectado do aparelho.",
+        503,
+        { requestId },
+      );
+    }
+    try {
+      await client.logoutInstance(session.evolution_session_name as string);
+      await client.deleteInstance(session.evolution_session_name as string);
+    } catch (err) {
+      return fail("whatsapp_error", wahaFriendlyError(err), 502, { requestId });
+    }
+  } else if (session.provider === CHANNEL_PROVIDER_WAHA) {
     const waha = getWahaClient();
     if (!waha) {
       return fail(
@@ -349,6 +393,7 @@ export async function DELETE(
     requestId,
     metadata: {
       waha_session_name: session.waha_session_name,
+      evolution_session_name: session.evolution_session_name,
       phone_number: session.phone_number,
       provider: session.provider,
       ...impact.history,

@@ -4,11 +4,13 @@ import { NextResponse } from "next/server";
 import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
-import { CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
+import { CHANNEL_PROVIDER_EVOLUTION, CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
 import {
   reactivateChannelSession,
   type ChannelReactivationActor,
 } from "@/lib/channels/reactivate";
+import { activeQrTransport, evolutionCreateInstance } from "@/lib/channels/transport";
+import { getEvolutionClient } from "@/lib/evolution";
 import { getWahaClient } from "@/lib/waha/client";
 import { createClient } from "@/lib/supabase/server";
 
@@ -57,15 +59,17 @@ function defaultSessionName(orgId: string): string {
 async function ensureChannelSession(
   orgId: string,
   sessionName: string,
+  provider: "waha" | "evolution",
   actor: ChannelReactivationActor,
 ): Promise<string> {
   const supabase = await createClient();
+  // Cada provider tem sua coluna de sessão na união tagged (0087/0137).
   const buscar = (colunas: string) =>
     supabase
       .from("channel_sessions")
       .select(colunas)
       .eq("organization_id", orgId)
-      .eq("waha_session_name", sessionName)
+      .eq(provider === "evolution" ? "evolution_session_name" : "waha_session_name", sessionName)
       .maybeSingle();
   const { data: existingRaw } = await queryTolerantToMissingArchived(
     () => buscar(`id, ${ARCHIVED_AT}`),
@@ -96,9 +100,11 @@ async function ensureChannelSession(
     .from("channel_sessions")
     .insert({
       organization_id: orgId,
-      waha_session_name: sessionName,
+      provider,
+      waha_session_name: provider === "waha" ? sessionName : null,
+      evolution_session_name: provider === "evolution" ? sessionName : null,
       engine: "NOWEB",
-      webhook_path_token: crypto.randomUUID().replace(/-/g, ""),
+      webhook_path_token: randomUUID().replace(/-/g, ""),
       webhook_secret_encrypted: Buffer.from([0]),
       status: "STARTING",
       last_status_change_at: new Date().toISOString(),
@@ -117,10 +123,23 @@ export async function GET() {
   if (!user) return fail("unauthenticated", "Sessão expirada", 401);
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return fail("tenant_not_found", "Sem organização ativa", 404);
-  const waha = getWahaClient();
-  if (!waha) return ok({ status: "WAHA_NOT_CONFIGURED", session: null });
   const sessionName = defaultSessionName(activeOrg.orgId);
+
+  const provider = activeQrTransport();
+  if (!provider) return ok({ status: "WHATSAPP_NOT_CONFIGURED", session: null });
+
   try {
+    if (provider === "evolution") {
+      const client = getEvolutionClient();
+      if (!client) return ok({ status: "WHATSAPP_NOT_CONFIGURED", session: null });
+      const remote = await client.getInstanceStatus(sessionName);
+      const state = remote.instance?.state ?? "close";
+      const status =
+        state === "open" ? "WORKING" : state === "connecting" ? "SCAN_QR_CODE" : "NOT_STARTED";
+      return ok({ status, session: sessionName });
+    }
+    const waha = getWahaClient();
+    if (!waha) return ok({ status: "WHATSAPP_NOT_CONFIGURED", session: null });
     const remote = (await waha.getSessionQr(sessionName)) as WahaSessionResponse;
     return ok({ status: remote.status ?? "UNKNOWN", session: sessionName });
   } catch (err) {
@@ -136,50 +155,99 @@ export async function POST(req: Request) {
   if (!user) return fail("unauthenticated", "Sessão expirada", 401);
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return fail("tenant_not_found", "Sem organização ativa", 404);
-  const waha = getWahaClient();
-  if (!waha) return fail("waha_not_configured", "Suba o Docker (docker compose up -d waha) e tente novamente.", 503);
+  const provider = activeQrTransport();
+  if (!provider) {
+    return fail(
+      "whatsapp_not_configured",
+      "Suba o Docker do transporte de WhatsApp (Evolution API ou WAHA) e tente novamente.",
+      503,
+    );
+  }
   const sessionName = defaultSessionName(activeOrg.orgId);
 
   // 1) Make sure we have a row in channel_sessions.
-  const channelSessionId = await ensureChannelSession(activeOrg.orgId, sessionName, {
+  const channelSessionId = await ensureChannelSession(activeOrg.orgId, sessionName, provider, {
     userId: user.id,
     requestId,
-    metadata: { provider: CHANNEL_PROVIDER_WAHA, origin: "onboarding" },
+    metadata: {
+      provider: provider === "evolution" ? CHANNEL_PROVIDER_EVOLUTION : CHANNEL_PROVIDER_WAHA,
+      origin: "onboarding",
+    },
   });
 
-  // 1b) `?restart=1` = pedido explícito de QR novo. O start sozinho não resolve
-  // uma sessão FAILED: o WAHA responde 422 ("already exists") e o usuário fica
-  // preso olhando um QR morto. O QR do WhatsApp expira em poucos minutos, então
-  // "falhou, gere outro" é fluxo normal do onboarding, não caso de exceção.
-  if (new URL(req.url).searchParams.get("restart") === "1") {
-    try {
-      await waha.stopSession(sessionName);
-    } catch {
-      // Sessão já parada/inexistente: seguir para o start é o comportamento certo.
-    }
-  }
-
-  // 2) Start the session in WAHA. Idempotent — WAHA returns 422 if already started; treat as ok.
   try {
-    const remote = (await waha.startSession(sessionName)) as WahaSessionResponse;
-    // `requestId` também na resposta: é ele que liga o `X-Request-Id` que o
-    // operador vê ao evento `channel.reactivated` que a ressurreição gravou.
-    return ok(
-      { status: remote.status ?? "STARTING", session: sessionName, channel_session_id: channelSessionId },
-      { requestId },
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "unknown";
-    if (msg.includes("422") || msg.includes("409")) {
-      // Session already exists — just fetch status.
-      const remote = (await waha.getSessionQr(sessionName)) as WahaSessionResponse;
+    if (provider === "evolution") {
+      const client = getEvolutionClient();
+      if (!client) {
+        return fail(
+          "evolution_not_configured",
+          "A Evolution API não está configurada neste ambiente (faltam EVOLUTION_API_URL e/ou EVOLUTION_API_KEY).",
+          503,
+          { requestId },
+        );
+      }
+      // `?restart=1` = pedido explícito de QR novo: descarta a instância e recomeça
+      // o pareamento. Sem ele, cria (idempotente) e conecta.
+      if (new URL(req.url).searchParams.get("restart") === "1") {
+        await client.logoutInstance(sessionName).catch(() => undefined);
+        await client.deleteInstance(sessionName).catch(() => undefined);
+      }
+      await evolutionCreateInstance(sessionName).catch(() => undefined);
+      const remote = await client.connectInstance(sessionName);
+      const status = remote.instance?.status === "open" ? "WORKING" : "SCAN_QR_CODE";
       return ok(
-        { status: remote.status ?? "RUNNING", session: sessionName, channel_session_id: channelSessionId },
+        { status, session: sessionName, channel_session_id: channelSessionId },
         { requestId },
       );
     }
+
+    const waha = getWahaClient();
+    if (!waha) {
+      return fail(
+        "waha_not_configured",
+        "Suba o Docker (docker compose up -d waha) e tente novamente.",
+        503,
+      );
+    }
+    // 1b) `?restart=1` = pedido explícito de QR novo. O start sozinho não resolve
+    // uma sessão FAILED: o WAHA responde 422 ("already exists") e o usuário fica
+    // preso olhando um QR morto. O QR do WhatsApp expira em poucos minutos, então
+    // "falhou, gere outro" é fluxo normal do onboarding, não caso de exceção.
+    if (new URL(req.url).searchParams.get("restart") === "1") {
+      try {
+        await waha.stopSession(sessionName);
+      } catch {
+        // Sessão já parada/inexistente: seguir para o start é o comportamento certo.
+      }
+    }
+    // 2) Start the session in WAHA. Idempotent — WAHA returns 422 if already started; treat as ok.
+    try {
+      const remote = (await waha.startSession(sessionName)) as WahaSessionResponse;
+      // `requestId` também na resposta: é ele que liga o `X-Request-Id` que o
+      // operador vê ao evento `channel.reactivated` que a ressurreição gravou.
+      return ok(
+        { status: remote.status ?? "STARTING", session: sessionName, channel_session_id: channelSessionId },
+        { requestId },
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown";
+      if (msg.includes("422") || msg.includes("409")) {
+        // Session already exists — just fetch status.
+        const remote = (await waha.getSessionQr(sessionName)) as WahaSessionResponse;
+        return ok(
+          { status: remote.status ?? "RUNNING", session: sessionName, channel_session_id: channelSessionId },
+          { requestId },
+        );
+      }
+      return NextResponse.json(
+        { error: { code: "waha_start_failed", message: msg } },
+        { status: 502 },
+      );
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown";
     return NextResponse.json(
-      { error: { code: "waha_start_failed", message: msg } },
+      { error: { code: "start_failed", message: msg } },
       { status: 502 },
     );
   }

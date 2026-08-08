@@ -8417,19 +8417,21 @@ alter table public.channel_sessions
   add column if not exists provider text not null default 'waha',
   add column if not exists meta_phone_number_id text,
   add column if not exists meta_waba_id text,
-  add column if not exists meta_token_encrypted bytea;
+  add column if not exists meta_token_encrypted bytea,
+  add column if not exists evolution_session_name text;
 
 alter table public.channel_sessions alter column waha_session_name drop not null;
 
 do $$ begin
   alter table public.channel_sessions add constraint channel_sessions_provider_check
-    check (provider = any (array['waha'::text, 'meta_cloud'::text]));
+    check (provider = any (array['waha'::text, 'meta_cloud'::text, 'evolution'::text]));
 exception when duplicate_object then null; end $$;
 
 do $$ begin
   alter table public.channel_sessions add constraint channel_sessions_provider_ref_check check (
-    (provider = 'waha'       and waha_session_name    is not null) or
-    (provider = 'meta_cloud' and meta_phone_number_id is not null)
+    (provider = 'waha'       and waha_session_name     is not null) or
+    (provider = 'meta_cloud' and meta_phone_number_id  is not null) or
+    (provider = 'evolution'  and evolution_session_name is not null)
   );
 exception when duplicate_object then null; end $$;
 

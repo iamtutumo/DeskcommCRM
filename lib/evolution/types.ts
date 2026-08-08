@@ -43,6 +43,27 @@ export interface EvolutionInstanceStatusResponse {
   };
 }
 
+/** Resposta de POST /instance/create. */
+export interface EvolutionCreateInstanceResponse {
+  instance?: { instanceName?: string; status?: string };
+  hash?: string;
+  qrcode?: { code?: string; base64?: string } | null;
+}
+
+/** Resposta de GET /instance/connect/{name} (gera/retorna o QR). */
+export interface EvolutionConnectResponse {
+  qrcode?: { code?: string; base64?: string; pairingCode?: string } | null;
+  instance?: { instanceName?: string; status?: string };
+}
+
+/** Item de GET /instance/fetchInstances. */
+export interface EvolutionFetchedInstance {
+  instanceName?: string;
+  connectionStatus?: string;
+  ownerJid?: string | null;
+  number?: string | null;
+}
+
 export interface EvolutionWebhookPayload {
   event: string; // e.g. "messages.upsert", "messages.update", "connection.update"
   instance: string;

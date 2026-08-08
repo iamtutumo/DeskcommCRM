@@ -14,6 +14,7 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
+import { activeQrTransport, evolutionCreateInstance } from "@/lib/channels/transport";
 import { createChannelSchema } from "@/lib/schemas/channels";
 import { createClient } from "@/lib/supabase/server";
 import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
@@ -21,7 +22,7 @@ import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
 export const dynamic = "force-dynamic";
 
 export const CHANNEL_COLUMNS =
-  "id, waha_session_name, display_name, phone_number, status, status_reason, last_health_check_at, last_status_change_at, daily_message_limit, is_warmup_complete, created_at";
+  "id, provider, waha_session_name, evolution_session_name, display_name, phone_number, status, status_reason, last_health_check_at, last_status_change_at, daily_message_limit, is_warmup_complete, created_at";
 
 export async function GET(): Promise<Response> {
   const requestId = randomUUID();
@@ -66,11 +67,11 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!authz.ok) return authz.response;
   const { user, org: activeOrg } = authz;
 
-  const waha = getWahaClient();
-  if (!waha) {
+  const transport = activeQrTransport();
+  if (!transport) {
     return fail(
-      "waha_not_configured",
-      "O WhatsApp (WAHA) não está configurado neste ambiente: faltam WAHA_API_BASE_URL e/ou WAHA_API_KEY. Configure-as e tente de novo.",
+      "whatsapp_not_configured",
+      "O WhatsApp não está configurado neste ambiente: faltam as credenciais do transporte (WAHA ou Evolution). Configure-as e tente de novo.",
       503,
       { requestId },
     );
@@ -98,7 +99,9 @@ export async function POST(req: NextRequest): Promise<Response> {
     .from("channel_sessions")
     .insert({
       organization_id: activeOrg.orgId,
-      waha_session_name: sessionName,
+      provider: transport,
+      waha_session_name: transport === "waha" ? sessionName : null,
+      evolution_session_name: transport === "evolution" ? sessionName : null,
       display_name: parsed.data.display_name ?? null,
       engine: "NOWEB",
       webhook_path_token: randomUUID().replace(/-/g, ""),
@@ -116,15 +119,20 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   try {
-    await waha.startSession(sessionName);
+    if (transport === "evolution") {
+      await evolutionCreateInstance(sessionName);
+    } else {
+      const waha = getWahaClient();
+      if (waha) await waha.startSession(sessionName);
+    }
   } catch (err) {
-    // Rollback: sem WAHA no ar, não deixamos um canal fantasma preso em STARTING.
+    // Rollback: sem transporte no ar, não deixamos um canal fantasma preso em STARTING.
     await supabase
       .from("channel_sessions")
       .delete()
       .eq("organization_id", activeOrg.orgId)
       .eq("id", created.id);
-    return fail("waha_error", wahaFriendlyError(err), 502, { requestId });
+    return fail("whatsapp_error", wahaFriendlyError(err), 502, { requestId });
   }
 
   void audit({
@@ -134,7 +142,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     resourceType: "channel_session",
     resourceId: created.id,
     requestId,
-    metadata: { waha_session_name: sessionName },
+    metadata: { provider: transport, session_name: sessionName },
   });
 
   return ok(created, { requestId, status: 201 });

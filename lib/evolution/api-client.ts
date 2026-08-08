@@ -12,6 +12,9 @@ import {
   type EvolutionConfig,
 } from "./config";
 import type {
+  EvolutionConnectResponse,
+  EvolutionCreateInstanceResponse,
+  EvolutionFetchedInstance,
   EvolutionInstanceStatusResponse,
   EvolutionMessageResponse,
   EvolutionSendMediaRequest,
@@ -80,7 +83,10 @@ export class EvolutionApiClient {
         );
       }
 
-      return (await response.json()) as T;
+      // DELETE/logout costumam responder 200 com corpo vazio — não quebrar lendo JSON.
+      const text = await response.text();
+      if (!text) return undefined as T;
+      return JSON.parse(text) as T;
     } finally {
       clearTimeout(timeout);
     }
@@ -88,8 +94,11 @@ export class EvolutionApiClient {
 
   /**
    * Sends a plain text WhatsApp message to the specified phone number.
+   *
+   * `instanceName` defaults to the env `EVOLUTION_INSTANCE_NAME` (the single
+   * self-host instance). Multi-number installs pass the explicit instance.
    */
-  async sendText(number: string, text: string): Promise<EvolutionMessageResponse> {
+  async sendText(number: string, text: string, instanceName?: string): Promise<EvolutionMessageResponse> {
     const cleanNumber = number.replace(/\D/g, "");
     const payload: EvolutionSendTextRequest = {
       number: cleanNumber,
@@ -101,7 +110,7 @@ export class EvolutionApiClient {
     };
 
     return this.request<EvolutionMessageResponse>(
-      `/message/sendText/${encodeURIComponent(this.config.instanceName)}`,
+      `/message/sendText/${encodeURIComponent(instanceName ?? this.config.instanceName)}`,
       {
         method: "POST",
         body: payload,
@@ -118,19 +127,37 @@ export class EvolutionApiClient {
     fileName: string,
     caption?: string,
   ): Promise<EvolutionMessageResponse> {
+    return this.sendMedia(number, "document", mediaUrlOrBase64, fileName, caption);
+  }
+
+  /**
+   * Sends media of any supported type via the Evolution API `sendMedia` route.
+   *
+   * `mediatype` is one of `image | document | video | audio`. `media` accepts a
+   * public URL or a base64 data string; Evolution downloads/uploads it server-side.
+   * `fileName` is required for `document`; for `audio` a caption is ignored.
+   */
+  async sendMedia(
+    number: string,
+    mediatype: "image" | "document" | "video" | "audio",
+    mediaUrlOrBase64: string,
+    fileName?: string,
+    caption?: string,
+    instanceName?: string,
+  ): Promise<EvolutionMessageResponse> {
     const cleanNumber = number.replace(/\D/g, "");
     const payload: EvolutionSendMediaRequest = {
       number: cleanNumber,
       mediaMessage: {
-        mediatype: "document",
+        mediatype,
         media: mediaUrlOrBase64,
-        fileName,
-        caption,
+        ...(fileName ? { fileName } : {}),
+        ...(caption ? { caption } : {}),
       },
     };
 
     return this.request<EvolutionMessageResponse>(
-      `/message/sendMedia/${encodeURIComponent(this.config.instanceName)}`,
+      `/message/sendMedia/${encodeURIComponent(instanceName ?? this.config.instanceName)}`,
       {
         method: "POST",
         body: payload,
@@ -141,9 +168,64 @@ export class EvolutionApiClient {
   /**
    * Retrieves the connection state of the Evolution API WhatsApp instance.
    */
-  async getInstanceStatus(): Promise<EvolutionInstanceStatusResponse> {
+  async getInstanceStatus(instanceName?: string): Promise<EvolutionInstanceStatusResponse> {
     return this.request<EvolutionInstanceStatusResponse>(
-      `/instance/connectionState/${encodeURIComponent(this.config.instanceName)}`,
+      `/instance/connectionState/${encodeURIComponent(instanceName ?? this.config.instanceName)}`,
     );
+  }
+
+  // ── Gestão de instâncias (control plane: criar, conectar, listar, deslogar) ──
+
+  /**
+   * Cria uma instância WhatsApp na Evolution API (Baileys) e já devolve o QR.
+   *
+   * `webhookUrl` opcional: se fornecido, configura o webhook da instância na
+   * criação (aponta para o receiver /api/v1/webhooks/evolution).
+   */
+  async createInstance(
+    instanceName: string,
+    webhookUrl?: string,
+  ): Promise<EvolutionCreateInstanceResponse> {
+    const body: Record<string, unknown> = {
+      instanceName,
+      integration: "WHATSAPP-BAILEYS",
+      qrcode: true,
+    };
+    if (webhookUrl) {
+      body.webhook = { enabled: true, url: webhookUrl, byEvents: true, base64: false };
+    }
+    return this.request<EvolutionCreateInstanceResponse>("/instance/create", {
+      method: "POST",
+      body,
+    });
+  }
+
+  /**
+   * Conecta uma instância (gera ou retorna o QR atual) via GET /instance/connect.
+   */
+  async connectInstance(instanceName: string): Promise<EvolutionConnectResponse> {
+    return this.request<EvolutionConnectResponse>(
+      `/instance/connect/${encodeURIComponent(instanceName)}`,
+    );
+  }
+
+  /** Lista todas as instâncias e seus estados (`connectionStatus`). */
+  async fetchInstances(): Promise<EvolutionFetchedInstance[]> {
+    const data = await this.request<unknown>("/instance/fetchInstances");
+    return Array.isArray(data) ? (data as EvolutionFetchedInstance[]) : [];
+  }
+
+  /** Desloga a instância (descarta as credenciais pareadas). */
+  async logoutInstance(instanceName: string): Promise<void> {
+    await this.request<void>(`/instance/logout/${encodeURIComponent(instanceName)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /** Remove a instância por completo (registro + credenciais). */
+  async deleteInstance(instanceName: string): Promise<void> {
+    await this.request<void>(`/instance/delete/${encodeURIComponent(instanceName)}`, {
+      method: "DELETE",
+    });
   }
 }

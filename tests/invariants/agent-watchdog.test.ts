@@ -44,8 +44,7 @@ const sendTextCalls: Array<{ session: string; chatId: string; text: string }> = 
 
 function watchdogCfg(): WatchdogConfig {
   return {
-    wahaBaseUrl: `http://127.0.0.1:${wahaPort}`,
-    wahaApiKey: "test-key",
+    waha: { baseUrl: `http://127.0.0.1:${wahaPort}`, apiKey: "test-key" },
     intervalMs: 1000,
     redriveMinAgeMs: 0,
     redriveBatchSize: 10,
