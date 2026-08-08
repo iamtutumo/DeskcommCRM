@@ -38,6 +38,7 @@ import { audit } from "@/lib/audit";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
+import { getEvolutionClient } from "@/lib/evolution";
 import { createClient } from "@/lib/supabase/server";
 import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
 
@@ -81,12 +82,14 @@ export async function POST(
   // arquivado, e exigir a coluna aqui derrubaria a reconexão inteira — que é o
   // socorro de quem está com o número fora do ar.
   const { data: sessionRaw } = await queryTolerantToMissingArchived(
-    () => buscar(`id, waha_session_name, ${ARCHIVED_AT}`),
-    () => buscar("id, waha_session_name"),
+    () => buscar(`id, provider, waha_session_name, evolution_session_name, ${ARCHIVED_AT}`),
+    () => buscar("id, provider, waha_session_name, evolution_session_name"),
   );
   const session = sessionRaw as {
     id: string;
+    provider?: string | null;
     waha_session_name: string | null;
+    evolution_session_name: string | null;
     archived_at?: string | null;
   } | null;
   if (!session) return fail("not_found", "Canal não encontrado.", 404, { requestId });
@@ -103,7 +106,8 @@ export async function POST(
   // aqui (era um cast) não fazia o valor existir: mandava `null` para o
   // transporte, que pedia `/api/sessions/null/stop` e devolvia erro de serviço —
   // culpando o WhatsApp por uma pergunta que nunca fez sentido.
-  const nomeSessao = session.waha_session_name;
+  const nomeSessao =
+    session.provider === "evolution" ? session.evolution_session_name : session.waha_session_name;
   if (!nomeSessao) {
     return fail(
       "channel_without_session",
@@ -113,23 +117,41 @@ export async function POST(
     );
   }
 
-  const waha = getWahaClient();
-  if (!waha) {
-    return fail(
-      "waha_not_configured",
-      "O WhatsApp (WAHA) não está configurado neste ambiente: faltam WAHA_API_BASE_URL e/ou WAHA_API_KEY. Configure-as e tente de novo.",
-      503,
-      { requestId },
-    );
-  }
-
   try {
-    await waha.stopSession(nomeSessao);
-    // Só no modo forçado: descartar a credencial é irreversível — obriga a
-    // reescanear o QR mesmo que ela ainda estivesse boa.
-    if (force) await waha.logoutSession(nomeSessao);
-    const remote = (await waha.startSession(nomeSessao)) as { status?: string };
-    const nextStatus = remote.status ?? "STARTING";
+    let nextStatus = "STARTING";
+    if (session.provider === "evolution") {
+      const client = getEvolutionClient();
+      if (!client) {
+        return fail(
+          "evolution_not_configured",
+          "A Evolution API não está configurada neste ambiente: faltam EVOLUTION_API_URL e/ou EVOLUTION_API_KEY. Configure-as e tente de novo.",
+          503,
+          { requestId },
+        );
+      }
+      // Forçado = descartar a credencial e regerar o QR; suave = regenerar o QR
+      // sem deslogar. Na Evolution o start é implícito no connect (gera o QR).
+      if (force) await client.logoutInstance(nomeSessao);
+      const remote = await client.connectInstance(nomeSessao);
+      nextStatus = remote.instance?.status === "open" ? "WORKING" : "SCAN_QR_CODE";
+    } else {
+      const waha = getWahaClient();
+      if (!waha) {
+        return fail(
+          "waha_not_configured",
+          "O WhatsApp (WAHA) não está configurado neste ambiente: faltam WAHA_API_BASE_URL e/ou WAHA_API_KEY. Configure-as e tente de novo.",
+          503,
+          { requestId },
+        );
+      }
+      await waha.stopSession(nomeSessao);
+      // Só no modo forçado: descartar a credencial é irreversível — obriga a
+      // reescanear o QR mesmo que ela ainda estivesse boa.
+      if (force) await waha.logoutSession(nomeSessao);
+      const remote = (await waha.startSession(nomeSessao)) as { status?: string };
+      nextStatus = remote.status ?? "STARTING";
+    }
+
     await supabase
       .from("channel_sessions")
       .update({
@@ -147,11 +169,11 @@ export async function POST(
       resourceType: "channel_session",
       resourceId: id,
       requestId,
-      metadata: { waha_session_name: nomeSessao, force },
+      metadata: { provider: session.provider, session_name: nomeSessao, force },
     });
 
     return ok({ id, status: nextStatus, force }, { requestId });
   } catch (err) {
-    return fail("waha_error", wahaFriendlyError(err), 502, { requestId });
+    return fail("whatsapp_error", wahaFriendlyError(err), 502, { requestId });
   }
 }

@@ -47,6 +47,11 @@ const envSchema = z.object({
   // Opcionais no boot: sem WAHA_API_BASE_URL/KEY o watchdog fica OFF (warn).
   WAHA_API_BASE_URL: z.string().url().optional(),
   WAHA_API_KEY: z.string().min(1).optional(),
+  // Watchdog via Evolution API (transporte que substitui o WAHA). Mesmo contrato:
+  // opcional no boot; sem EVOLUTION_API_URL/KEY o watchdog de Evolution fica OFF.
+  EVOLUTION_API_URL: z.string().url().optional(),
+  EVOLUTION_API_KEY: z.string().min(1).optional(),
+  EVOLUTION_INSTANCE_NAME: z.string().min(1).optional(),
   WATCHDOG_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
   WATCHDOG_REDRIVE_MIN_AGE_MS: z.coerce.number().int().positive().default(30_000),
   WATCHDOG_REDRIVE_BATCH_SIZE: z.coerce.number().int().positive().default(10),

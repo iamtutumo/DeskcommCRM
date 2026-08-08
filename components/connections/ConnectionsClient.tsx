@@ -71,7 +71,7 @@ function errMsg(err: unknown, fallback: string): string {
  * restringe demais, nunca promete de menos.
  */
 function dependeDoTransporte(c: ChannelSession): boolean {
-  return Boolean(c.waha_session_name);
+  return Boolean(c.waha_session_name || c.evolution_session_name);
 }
 
 /** "3 conversas" / "1 conversa" — ou nada, quando não há o que contar. */

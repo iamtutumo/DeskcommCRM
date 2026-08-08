@@ -29,14 +29,16 @@ export interface SelectableChannel {
   phone_number: string | null;
 }
 
-const COLUNAS = "id, display_name, status, phone_number, waha_session_name";
+const COLUNAS = "id, display_name, status, phone_number, provider, waha_session_name, evolution_session_name";
 
 interface LinhaCanal {
   id: string;
   display_name: string | null;
   status: string;
   phone_number: string | null;
+  provider: string | null;
   waha_session_name: string | null;
+  evolution_session_name: string | null;
 }
 
 /**
@@ -64,7 +66,11 @@ export async function listSelectableChannels(
     // O nome da sessão no transporte só existe no ramo pareado por QR (é o que
     // `channel_sessions_provider_ref_check` exige lá); o canal oficial nasce sem
     // ele. Sem o último degrau, um oficial sem apelido viraria opção em branco.
-    display_name: c.display_name ?? c.waha_session_name ?? c.phone_number ?? "Número sem nome",
+    display_name:
+      c.display_name ??
+      (c.provider === "evolution" ? c.evolution_session_name : c.waha_session_name) ??
+      c.phone_number ??
+      "Número sem nome",
     status: c.status,
     phone_number: c.phone_number ?? null,
   }));

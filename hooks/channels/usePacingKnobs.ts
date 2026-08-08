@@ -6,7 +6,9 @@ import type { ChannelKnobsRow, PacingKnobsUpdate } from "@/lib/ai/pacing-knobs";
 
 export interface PacingSessionLite {
   id: string;
+  provider: string | null;
   waha_session_name: string | null;
+  evolution_session_name: string | null;
   display_name: string | null;
   phone_number: string | null;
   status: string | null;

@@ -6,12 +6,18 @@ import { apiClient } from "@/lib/api/client";
 export interface ChannelSession {
   id: string;
   /**
-   * Nome da sessão no transporte. NULL no canal oficial, que não tem sessão a
-   * iniciar, deslogar ou apagar — é o que distingue, na tela, quem depende do
-   * serviço de WhatsApp para ser excluído. O tipo dizia `string` e mentia: um
-   * canal oficial rendia rótulo vazio onde a tela concatenava esse campo.
+   * Provider do transporte. `waha` (legado) ou `evolution` (novo). O canal
+   * oficial é `meta_cloud` e não tem sessão a iniciar/deslogar/apagar.
+   */
+  provider: string | null;
+  /**
+   * Nome da sessão no transporte WAHA. NULL no canal oficial e no de Evolution.
+   * O que distingue, na tela, quem depende do serviço de WhatsApp é "tem nome de
+   * sessão em QUALQUER transporte" (waha OU evolution).
    */
   waha_session_name: string | null;
+  /** Nome da sessão no transporte Evolution (coluna 0137). NULL fora dele. */
+  evolution_session_name: string | null;
   display_name: string | null;
   phone_number: string | null;
   status: string;
@@ -25,6 +31,14 @@ export interface ChannelSession {
 
 export type ConnectionHealth = "connected" | "connecting" | "down" | "none" | "unknown";
 
+/** Nome de sessão em QUALQUER transporte (WAHA ou Evolution), ou null. */
+export function sessionNameOf(
+  c: Pick<ChannelSession, "provider" | "waha_session_name" | "evolution_session_name">,
+): string | null {
+  if (c.provider === "evolution") return c.evolution_session_name;
+  return c.waha_session_name;
+}
+
 /**
  * Como um canal se chama na tela. Existe porque nenhum dos três campos é
  * garantido: o canal oficial não tem nome de sessão no transporte, e um canal
@@ -32,9 +46,14 @@ export type ConnectionHealth = "connected" | "connecting" | "down" | "none" | "u
  * rendia uma opção em branco no seletor.
  */
 export function channelLabel(
-  c: Pick<ChannelSession, "display_name" | "phone_number" | "waha_session_name">,
+  c: Pick<ChannelSession, "display_name" | "phone_number" | "waha_session_name" | "evolution_session_name" | "provider">,
 ): string {
-  return c.display_name || c.phone_number || c.waha_session_name || "Número sem nome";
+  return (
+    c.display_name ||
+    c.phone_number ||
+    sessionNameOf(c) ||
+    "Número sem nome"
+  );
 }
 
 /**

@@ -24,6 +24,8 @@ import { NextResponse } from "next/server";
 
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
+import { evolutionQrImageBytes } from "@/lib/channels/transport";
+import { getEvolutionClient } from "@/lib/evolution";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -51,11 +53,13 @@ export async function GET(
   // arquivado, e exigir a coluna aqui apagaria o QR de quem está pareando agora
   // — o passo mais frágil da primeira instalação.
   const { data: sessionRaw } = await queryTolerantToMissingArchived(
-    () => buscar(`waha_session_name, ${ARCHIVED_AT}`),
-    () => buscar("waha_session_name"),
+    () => buscar(`provider, waha_session_name, evolution_session_name, ${ARCHIVED_AT}`),
+    () => buscar("provider, waha_session_name, evolution_session_name"),
   );
   const session = sessionRaw as {
+    provider?: string | null;
     waha_session_name: string | null;
+    evolution_session_name: string | null;
     archived_at?: string | null;
   } | null;
   if (!session) return new NextResponse(null, { status: 404 });
@@ -67,14 +71,46 @@ export async function GET(
       headers: { "x-channel-state": "archived" },
     });
   }
-  // Canal oficial não pareia por QR: `waha_session_name` é NULL nele por CHECK.
+  const sessionName =
+    session.provider === "evolution" ? session.evolution_session_name : session.waha_session_name;
+  // Canal oficial não pareia por QR: o nome de sessão é NULL nele por CHECK.
   // Afirmar `string` aqui (era um cast) só adiava a mentira até a URL, que virava
   // `/api/null/auth/qr` — 404 do transporte, indistinguível de "o QR ainda não
   // ficou pronto", que é exatamente o estado em que a tela fica insistindo.
-  if (!session.waha_session_name) {
+  if (!sessionName) {
     return new NextResponse(null, {
       status: 409,
       headers: { "x-channel-state": "no-session" },
+    });
+  }
+
+  if (session.provider === "evolution") {
+    const client = getEvolutionClient();
+    if (!client) return new NextResponse(null, { status: 503 });
+    let res;
+    try {
+      res = await client.connectInstance(sessionName);
+    } catch {
+      return new NextResponse(null, {
+        status: 502,
+        headers: { "x-evolution-state": "connect-failed" },
+      });
+    }
+    const img = evolutionQrImageBytes(res.qrcode?.base64);
+    if (!img) {
+      // Sem QR: instância já conectada (open) — a tela para de pedir. Estado do
+      // próprio payload, não um 404 do transporte.
+      const state = res.instance?.status;
+      return new NextResponse(null, {
+        status: 409,
+        headers: {
+          "x-channel-state": state === "open" ? "connected" : "no-qr",
+        },
+      });
+    }
+    return new NextResponse(new Uint8Array(img), {
+      status: 200,
+      headers: { "content-type": "image/png", "cache-control": "no-store, max-age=0" },
     });
   }
 
@@ -85,7 +121,7 @@ export async function GET(
   }
 
   const upstream = await fetch(
-    `${baseUrl}/api/${encodeURIComponent(session.waha_session_name)}/auth/qr?format=image`,
+    `${baseUrl}/api/${encodeURIComponent(sessionName)}/auth/qr?format=image`,
     { headers: { "X-Api-Key": apiKey }, cache: "no-store" },
   );
   if (!upstream.ok) {

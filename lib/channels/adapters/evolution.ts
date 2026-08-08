@@ -85,6 +85,7 @@ export const evolutionAdapter: ChannelAdapter = {
     // UI mostra o banner de "canal não conectado".
     if (!client) return { externalId: null };
 
+    const instanceName = envelope.sessionRef || undefined;
     if (envelope.media) {
       const res = await client.sendMedia(
         envelope.to,
@@ -92,11 +93,12 @@ export const evolutionAdapter: ChannelAdapter = {
         envelope.media.url,
         envelope.media.filename ?? undefined,
         envelope.media.caption ?? undefined,
+        instanceName,
       );
       return { externalId: messageIdOf(res) };
     }
 
-    const res = await client.sendText(envelope.to, envelope.body ?? "");
+    const res = await client.sendText(envelope.to, envelope.body ?? "", instanceName);
     return { externalId: messageIdOf(res) };
   },
 };
