@@ -61,6 +61,12 @@ describe("a OpenRouter entrou de fato", () => {
 });
 
 describe("forma de cada provedor", () => {
+  it("ollama é o primeiro da lista e o provedor default", () => {
+    expect(PROVEDORES[0]?.id).toBe("ollama");
+    expect(PROVEDORES[0]?.aceitaEndpointProprio).toBe(true);
+    expect(registry["ollama"]).toBeTypeOf("function");
+  });
+
   it("cada um explica quando usar, em português de gente", () => {
     for (const p of PROVEDORES) {
       expect(p.rotulo.trim().length, `${p.id} sem rótulo`).toBeGreaterThan(0);

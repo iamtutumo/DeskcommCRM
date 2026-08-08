@@ -10109,4 +10109,551 @@ grant execute on function public.fn_encrypt_oauth(text) to service_role;
 grant execute on function public.fn_lgpd_cascade_redact_contact(uuid, uuid, uuid) to service_role;
 grant execute on function public.fn_update_budget_consumption() to service_role;
 
+-- =============================================================================
+-- APPENDIX: MICROFINANCE, ACCOUNTING, EVOLUTION API, CHATTER & EXTERNAL INTEGRATIONS
+-- Owner: Tutu Moses (iamtutumo)
+-- =============================================================================
+
+-- 0131: Mifos / Fineract Integration
+ALTER TABLE "public"."tenant_integrations"
+  DROP CONSTRAINT IF EXISTS "tenant_integrations_provider_check";
+ALTER TABLE "public"."tenant_integrations"
+  ADD CONSTRAINT "tenant_integrations_provider_check"
+  CHECK (("provider" = ANY (ARRAY['nuvemshop'::"text", 'vtex'::"text", 'shopify'::"text", 'mifos'::"text"])));
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_clients" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "external_id" "text",
+    "fineract_client_id" bigint NOT NULL,
+    "account_no" "text" NOT NULL,
+    "display_name" "text" NOT NULL,
+    "mobile_no" "text",
+    "contact_id" "uuid",
+    "status_code" "text" NOT NULL,
+    "active" boolean DEFAULT true NOT NULL,
+    "payload" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_clients_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "mifos_clients_org_client_uniq" UNIQUE ("organization_id", "fineract_client_id")
+);
+ALTER TABLE "public"."mifos_clients" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_clients" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_clients_org_policy" ON "public"."mifos_clients"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_loan_accounts" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "fineract_loan_id" bigint NOT NULL,
+    "account_no" "text" NOT NULL,
+    "client_id" "uuid",
+    "fineract_client_id" bigint NOT NULL,
+    "product_id" bigint NOT NULL,
+    "product_name" "text" NOT NULL,
+    "status_code" "text" NOT NULL,
+    "principal_cents" bigint NOT NULL,
+    "total_outstanding_cents" bigint DEFAULT 0 NOT NULL,
+    "total_overdue_cents" bigint DEFAULT 0 NOT NULL,
+    "in_arrears" boolean DEFAULT false NOT NULL,
+    "crm_lead_id" "uuid",
+    "payload" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_loan_accounts_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "mifos_loan_accounts_org_loan_uniq" UNIQUE ("organization_id", "fineract_loan_id")
+);
+ALTER TABLE "public"."mifos_loan_accounts" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_loan_accounts" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_loan_accounts_org_policy" ON "public"."mifos_loan_accounts"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+-- 0132: Authoritative Double-Entry Accounting & Evolution API
+ALTER TABLE "public"."channel_sessions"
+  DROP CONSTRAINT IF EXISTS "channel_sessions_provider_check";
+ALTER TABLE "public"."channel_sessions"
+  ADD CONSTRAINT "channel_sessions_provider_check"
+  CHECK (("provider" = ANY (ARRAY['waha'::"text", 'meta_cloud'::"text", 'evolution'::"text"])));
+
+CREATE TABLE IF NOT EXISTS "public"."accounting_accounts" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "code" "text" NOT NULL,
+    "name" "text" NOT NULL,
+    "type" "text" NOT NULL,
+    "currency" character(3) DEFAULT 'UGX'::"bpchar" NOT NULL,
+    "is_active" boolean DEFAULT true NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "accounting_accounts_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "accounting_accounts_org_code_uniq" UNIQUE ("organization_id", "code"),
+    CONSTRAINT "accounting_accounts_type_check" CHECK (("type" = ANY (ARRAY['asset'::"text", 'liability'::"text", 'equity'::"text", 'revenue'::"text", 'expense'::"text"])))
+);
+ALTER TABLE "public"."accounting_accounts" OWNER TO "postgres";
+ALTER TABLE "public"."accounting_accounts" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "accounting_accounts_org_policy" ON "public"."accounting_accounts"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."accounting_journal_entries" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "entry_date" date NOT NULL,
+    "description" "text" NOT NULL,
+    "reference_id" "text",
+    "reference_type" "text",
+    "status" "text" DEFAULT 'posted'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "accounting_journal_entries_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "accounting_journal_entries_status_check" CHECK (("status" = ANY (ARRAY['posted'::"text", 'voided'::"text"])))
+);
+ALTER TABLE "public"."accounting_journal_entries" OWNER TO "postgres";
+ALTER TABLE "public"."accounting_journal_entries" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "accounting_journal_entries_org_policy" ON "public"."accounting_journal_entries"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."accounting_journal_lines" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "journal_entry_id" "uuid" NOT NULL,
+    "account_code" "text" NOT NULL,
+    "account_name" "text" NOT NULL,
+    "debit_cents" bigint DEFAULT 0 NOT NULL,
+    "credit_cents" bigint DEFAULT 0 NOT NULL,
+    "memo" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "accounting_journal_lines_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "accounting_journal_lines_non_negative_check" CHECK ((("debit_cents" >= 0) AND ("credit_cents" >= 0)))
+);
+ALTER TABLE "public"."accounting_journal_lines" OWNER TO "postgres";
+ALTER TABLE "public"."accounting_journal_lines" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "accounting_journal_lines_org_policy" ON "public"."accounting_journal_lines"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+-- 0133: Flexible Multi-Currency & Unified Microfinance Transactions Table
+CREATE TABLE IF NOT EXISTS "public"."currency_exchange_rates" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "base_currency" character(3) DEFAULT 'UGX'::"bpchar" NOT NULL,
+    "target_currency" character(3) NOT NULL,
+    "rate" numeric(15,6) NOT NULL,
+    "effective_date" date NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "currency_exchange_rates_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "currency_exchange_rates_org_pair_date_uniq" UNIQUE ("organization_id", "base_currency", "target_currency", "effective_date"),
+    CONSTRAINT "currency_exchange_rates_positive_check" CHECK (("rate" > 0))
+);
+ALTER TABLE "public"."currency_exchange_rates" OWNER TO "postgres";
+ALTER TABLE "public"."currency_exchange_rates" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "currency_exchange_rates_org_policy" ON "public"."currency_exchange_rates"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."microfinance_transactions" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "transaction_date" date NOT NULL,
+    "transaction_type" "text" NOT NULL,
+    "client_id" "text" NOT NULL,
+    "loan_id" "text",
+    "savings_id" "text",
+    "share_id" "text",
+    "original_currency" character(3) DEFAULT 'UGX'::"bpchar" NOT NULL,
+    "original_amount_minor_units" bigint NOT NULL,
+    "exchange_rate_to_base" numeric(15,6) DEFAULT 1 NOT NULL,
+    "base_currency" character(3) DEFAULT 'UGX'::"bpchar" NOT NULL,
+    "base_amount_minor_units" bigint NOT NULL,
+    "payment_method" "text" DEFAULT 'cash'::"text" NOT NULL,
+    "reference_number" "text",
+    "journal_entry_id" "uuid",
+    "notes" "text",
+    "status" "text" DEFAULT 'completed'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "microfinance_transactions_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "microfinance_transactions_positive_amount_check" CHECK ((("original_amount_minor_units" > 0) AND ("base_amount_minor_units" > 0))),
+    CONSTRAINT "microfinance_transactions_type_check" CHECK (("transaction_type" = ANY (ARRAY['loan_disbursement'::"text", 'loan_repayment'::"text", 'savings_deposit'::"text", 'savings_withdrawal'::"text", 'share_purchase'::"text"]))),
+    CONSTRAINT "microfinance_transactions_payment_method_check" CHECK (("payment_method" = ANY (ARRAY['cash'::"text", 'mobile_money'::"text", 'bank_transfer'::"text", 'pix'::"text"])))
+);
+ALTER TABLE "public"."microfinance_transactions" OWNER TO "postgres";
+ALTER TABLE "public"."microfinance_transactions" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "microfinance_transactions_org_policy" ON "public"."microfinance_transactions"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+-- 0134: Record Collaboration & Audit Suite (Chatter, Audit Trail, Followers, Mentions, Activities, Emails, Attachments)
+CREATE TABLE IF NOT EXISTS "public"."record_audit_trail" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "record_type" "text" NOT NULL,
+    "record_id" "text" NOT NULL,
+    "changed_by_user_id" "text" NOT NULL,
+    "changed_by_name" "text" NOT NULL,
+    "field_name" "text" NOT NULL,
+    "old_value" "text",
+    "new_value" "text",
+    "changed_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "record_audit_trail_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "record_audit_trail_type_check" CHECK (("record_type" = ANY (ARRAY['claim'::"text", 'loan'::"text", 'customer'::"text", 'opportunity'::"text", 'invoice'::"text", 'ticket'::"text"])))
+);
+ALTER TABLE "public"."record_audit_trail" OWNER TO "postgres";
+ALTER TABLE "public"."record_audit_trail" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "record_audit_trail_org_policy" ON "public"."record_audit_trail"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."record_chatter_messages" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "record_type" "text" NOT NULL,
+    "record_id" "text" NOT NULL,
+    "author_id" "text" NOT NULL,
+    "author_name" "text" NOT NULL,
+    "message_type" "text" DEFAULT 'note'::"text" NOT NULL,
+    "content" "text" NOT NULL,
+    "mentions" "text"[] DEFAULT ARRAY[]::"text"[] NOT NULL,
+    "attachment_ids" "text"[] DEFAULT ARRAY[]::"text"[] NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "record_chatter_messages_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "record_chatter_messages_type_check" CHECK (("message_type" = ANY (ARRAY['note'::"text", 'email'::"text", 'comment'::"text"])))
+);
+ALTER TABLE "public"."record_chatter_messages" OWNER TO "postgres";
+ALTER TABLE "public"."record_chatter_messages" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "record_chatter_messages_org_policy" ON "public"."record_chatter_messages"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."record_followers" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "record_type" "text" NOT NULL,
+    "record_id" "text" NOT NULL,
+    "user_id" "text" NOT NULL,
+    "user_name" "text" NOT NULL,
+    "user_email" "text" NOT NULL,
+    "subscribed_events" "text"[] DEFAULT ARRAY['status_change'::"text", 'new_message'::"text", 'document_upload'::"text", 'activity_assigned'::"text"]::"text"[] NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "record_followers_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "record_followers_unique_sub" UNIQUE ("organization_id", "record_type", "record_id", "user_id")
+);
+ALTER TABLE "public"."record_followers" OWNER TO "postgres";
+ALTER TABLE "public"."record_followers" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "record_followers_org_policy" ON "public"."record_followers"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."record_mentions" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "record_type" "text" NOT NULL,
+    "record_id" "text" NOT NULL,
+    "chatter_message_id" "text" NOT NULL,
+    "mentioned_user_id" "text" NOT NULL,
+    "mentioned_user_name" "text" NOT NULL,
+    "is_read" boolean DEFAULT false NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "record_mentions_pkey" PRIMARY KEY ("id")
+);
+ALTER TABLE "public"."record_mentions" OWNER TO "postgres";
+ALTER TABLE "public"."record_mentions" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "record_mentions_org_policy" ON "public"."record_mentions"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."record_activities" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "record_type" "text" NOT NULL,
+    "record_id" "text" NOT NULL,
+    "activity_type" "text" NOT NULL,
+    "summary" "text" NOT NULL,
+    "assigned_to_user_id" "text" NOT NULL,
+    "assigned_to_name" "text" NOT NULL,
+    "due_date" date NOT NULL,
+    "status" "text" DEFAULT 'pending'::"text" NOT NULL,
+    "completed_at" timestamp with time zone,
+    "completed_by_user_id" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "record_activities_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "record_activities_type_check" CHECK (("activity_type" = ANY (ARRAY['call'::"text", 'email'::"text", 'meeting'::"text", 'todo'::"text", 'follow_up'::"text", 'review_document'::"text"]))),
+    CONSTRAINT "record_activities_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'completed'::"text", 'overdue'::"text"])))
+);
+ALTER TABLE "public"."record_activities" OWNER TO "postgres";
+ALTER TABLE "public"."record_activities" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "record_activities_org_policy" ON "public"."record_activities"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."record_emails" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "record_type" "text" NOT NULL,
+    "record_id" "text" NOT NULL,
+    "direction" "text" NOT NULL,
+    "from_address" "text" NOT NULL,
+    "to_addresses" "text"[] DEFAULT ARRAY[]::"text"[] NOT NULL,
+    "cc_addresses" "text"[] DEFAULT ARRAY[]::"text"[] NOT NULL,
+    "bcc_addresses" "text"[] DEFAULT ARRAY[]::"text"[] NOT NULL,
+    "subject" "text" NOT NULL,
+    "body_html" "text" NOT NULL,
+    "body_text" "text" NOT NULL,
+    "attachment_ids" "text"[] DEFAULT ARRAY[]::"text"[] NOT NULL,
+    "message_id" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "record_emails_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "record_emails_dir_check" CHECK (("direction" = ANY (ARRAY['outbound'::"text", 'inbound'::"text"])))
+);
+ALTER TABLE "public"."record_emails" OWNER TO "postgres";
+ALTER TABLE "public"."record_emails" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "record_emails_org_policy" ON "public"."record_emails"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."record_attachments" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "record_type" "text" NOT NULL,
+    "record_id" "text" NOT NULL,
+    "file_name" "text" NOT NULL,
+    "file_size" bigint NOT NULL,
+    "mime_type" "text" NOT NULL,
+    "storage_path" "text" NOT NULL,
+    "uploaded_by_user_id" "text" NOT NULL,
+    "uploaded_by_name" "text" NOT NULL,
+    "uploaded_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "record_attachments_pkey" PRIMARY KEY ("id")
+);
+ALTER TABLE "public"."record_attachments" OWNER TO "postgres";
+ALTER TABLE "public"."record_attachments" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "record_attachments_org_policy" ON "public"."record_attachments"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."user_discuss_channels" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "member_user_ids" "text"[] NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "user_discuss_channels_pkey" PRIMARY KEY ("id")
+);
+ALTER TABLE "public"."user_discuss_channels" OWNER TO "postgres";
+ALTER TABLE "public"."user_discuss_channels" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "user_discuss_channels_org_policy" ON "public"."user_discuss_channels"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."user_discuss_messages" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "channel_id" "uuid" NOT NULL,
+    "author_id" "text" NOT NULL,
+    "author_name" "text" NOT NULL,
+    "content" "text" NOT NULL,
+    "mentions" "text"[] DEFAULT ARRAY[]::"text"[] NOT NULL,
+    "attachment_ids" "text"[] DEFAULT ARRAY[]::"text"[] NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "user_discuss_messages_pkey" PRIMARY KEY ("id")
+);
+ALTER TABLE "public"."user_discuss_messages" OWNER TO "postgres";
+ALTER TABLE "public"."user_discuss_messages" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "user_discuss_messages_org_policy" ON "public"."user_discuss_messages"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+-- 0135: External Integrations Suite (EgoSMS, Documenso, HeyForms, IdSwyft, MinIO)
+CREATE TABLE IF NOT EXISTS "public"."tenant_external_integrations" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "provider" "text" NOT NULL,
+    "config_json" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "status" "text" DEFAULT 'not_configured'::"text" NOT NULL,
+    "last_synced_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "tenant_external_integrations_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "tenant_external_integrations_org_provider_uniq" UNIQUE ("organization_id", "provider"),
+    CONSTRAINT "tenant_external_integrations_provider_check" CHECK (("provider" = ANY (ARRAY['egosms'::"text", 'documenso'::"text", 'heyforms'::"text", 'idswyft'::"text", 'minio'::"text"]))),
+    CONSTRAINT "tenant_external_integrations_status_check" CHECK (("status" = ANY (ARRAY['ready'::"text", 'connecting'::"text", 'error'::"text", 'not_configured'::"text"])))
+);
+ALTER TABLE "public"."tenant_external_integrations" OWNER TO "postgres";
+ALTER TABLE "public"."tenant_external_integrations" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_external_integrations_org_policy" ON "public"."tenant_external_integrations"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+-- =============================================================================
+-- 0136_mifos_complete_catalogs_and_sync
+-- Complete Reference Catalogs & Account Sync (Branches, Staff, Products, Savings, Shares, Charges, Schedules)
+-- Architectural Owner: Tutu Moses (iamtutumo)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_branches" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "fineract_office_id" bigint NOT NULL,
+    "name" "text" NOT NULL,
+    "external_id" "text",
+    "opening_date" date,
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_branches_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "mifos_branches_org_office_uniq" UNIQUE ("organization_id", "fineract_office_id")
+);
+ALTER TABLE "public"."mifos_branches" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_branches" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_branches_org_policy" ON "public"."mifos_branches"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_staff" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "fineract_staff_id" bigint NOT NULL,
+    "first_name" "text" NOT NULL,
+    "last_name" "text" NOT NULL,
+    "display_name" "text" NOT NULL,
+    "office_id" bigint NOT NULL,
+    "office_name" "text" NOT NULL,
+    "is_loan_officer" boolean DEFAULT true NOT NULL,
+    "mobile_no" "text",
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_staff_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "mifos_staff_org_staff_uniq" UNIQUE ("organization_id", "fineract_staff_id")
+);
+ALTER TABLE "public"."mifos_staff" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_staff" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_staff_org_policy" ON "public"."mifos_staff"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_loan_products" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "fineract_product_id" bigint NOT NULL,
+    "name" "text" NOT NULL,
+    "short_name" "text" NOT NULL,
+    "currency_code" character(3) DEFAULT 'UGX'::"bpchar" NOT NULL,
+    "min_principal_minor_units" bigint,
+    "max_principal_minor_units" bigint,
+    "default_principal_minor_units" bigint,
+    "interest_rate_per_period" numeric(10,4),
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_loan_products_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "mifos_loan_products_org_product_uniq" UNIQUE ("organization_id", "fineract_product_id")
+);
+ALTER TABLE "public"."mifos_loan_products" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_loan_products" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_loan_products_org_policy" ON "public"."mifos_loan_products"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_savings_products" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "fineract_product_id" bigint NOT NULL,
+    "name" "text" NOT NULL,
+    "short_name" "text" NOT NULL,
+    "currency_code" character(3) DEFAULT 'UGX'::"bpchar" NOT NULL,
+    "nominal_annual_interest_rate" numeric(10,4),
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_savings_products_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "mifos_savings_products_org_product_uniq" UNIQUE ("organization_id", "fineract_product_id")
+);
+ALTER TABLE "public"."mifos_savings_products" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_savings_products" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_savings_products_org_policy" ON "public"."mifos_savings_products"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_share_products" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "fineract_product_id" bigint NOT NULL,
+    "name" "text" NOT NULL,
+    "short_name" "text" NOT NULL,
+    "currency_code" character(3) DEFAULT 'UGX'::"bpchar" NOT NULL,
+    "unit_price_minor_units" bigint,
+    "total_shares" bigint,
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_share_products_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "mifos_share_products_org_product_uniq" UNIQUE ("organization_id", "fineract_product_id")
+);
+ALTER TABLE "public"."mifos_share_products" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_share_products" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_share_products_org_policy" ON "public"."mifos_share_products"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_savings_accounts" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "fineract_savings_id" bigint NOT NULL,
+    "account_no" "text" NOT NULL,
+    "client_id" "uuid",
+    "fineract_client_id" bigint NOT NULL,
+    "product_id" bigint NOT NULL,
+    "product_name" "text" NOT NULL,
+    "status_code" "text" NOT NULL,
+    "account_balance_minor_units" bigint DEFAULT 0 NOT NULL,
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_savings_accounts_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "mifos_savings_accounts_org_savings_uniq" UNIQUE ("organization_id", "fineract_savings_id")
+);
+ALTER TABLE "public"."mifos_savings_accounts" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_savings_accounts" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_savings_accounts_org_policy" ON "public"."mifos_savings_accounts"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_share_accounts" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "fineract_share_id" bigint NOT NULL,
+    "account_no" "text" NOT NULL,
+    "client_id" "uuid",
+    "fineract_client_id" bigint NOT NULL,
+    "product_id" bigint NOT NULL,
+    "product_name" "text" NOT NULL,
+    "status_code" "text" NOT NULL,
+    "total_approved_shares" bigint DEFAULT 0 NOT NULL,
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_share_accounts_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "mifos_share_accounts_org_share_uniq" UNIQUE ("organization_id", "fineract_share_id")
+);
+ALTER TABLE "public"."mifos_share_accounts" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_share_accounts" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_share_accounts_org_policy" ON "public"."mifos_share_accounts"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_loan_charges" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "fineract_charge_id" bigint NOT NULL,
+    "fineract_loan_id" bigint NOT NULL,
+    "name" "text" NOT NULL,
+    "amount_minor_units" bigint NOT NULL,
+    "amount_paid_minor_units" bigint DEFAULT 0 NOT NULL,
+    "amount_outstanding_minor_units" bigint NOT NULL,
+    "is_paid" boolean DEFAULT false NOT NULL,
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_loan_charges_pkey" PRIMARY KEY ("id")
+);
+ALTER TABLE "public"."mifos_loan_charges" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_loan_charges" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_loan_charges_org_policy" ON "public"."mifos_loan_charges"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
+CREATE TABLE IF NOT EXISTS "public"."mifos_repayment_schedules" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "fineract_loan_id" bigint NOT NULL,
+    "period_number" integer NOT NULL,
+    "due_date" date NOT NULL,
+    "principal_due_minor_units" bigint NOT NULL,
+    "interest_due_minor_units" bigint NOT NULL,
+    "fee_charges_due_minor_units" bigint DEFAULT 0 NOT NULL,
+    "penalty_charges_due_minor_units" bigint DEFAULT 0 NOT NULL,
+    "total_due_minor_units" bigint NOT NULL,
+    "total_paid_minor_units" bigint DEFAULT 0 NOT NULL,
+    "total_outstanding_minor_units" bigint NOT NULL,
+    "is_complete" boolean DEFAULT false NOT NULL,
+    "last_synced_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "mifos_repayment_schedules_pkey" PRIMARY KEY ("id")
+);
+ALTER TABLE "public"."mifos_repayment_schedules" OWNER TO "postgres";
+ALTER TABLE "public"."mifos_repayment_schedules" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "mifos_repayment_schedules_org_policy" ON "public"."mifos_repayment_schedules"
+    USING (("organization_id" = ANY ("public"."fn_user_org_ids"())));
+
 notify pgrst, 'reload schema';

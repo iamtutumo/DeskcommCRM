@@ -1,4 +1,6 @@
-# DeskcommCRM — Kit de Instalação (HostGator)
+# DeskcommCRM — Kit de Instalação (HostGator / Self-Hosted)
+
+> 🇺🇸 **English speakers:** For English installation instructions and **Open-Source Self-Hosted Supabase** (`https://supabase.com/open-source`) support, see [README.en.md](README.en.md) and run `bash hostgator-setup-kit/install-en.sh`.
 
 Este kit sobe o **DeskcommCRM** no seu servidor VPS da HostGator. Você tem dois caminhos:
 
