@@ -226,7 +226,16 @@ apply_migrations() {
     local cname
     cname="$(docker ps -q -f name=supabase-db | head -n 1)"
     if [ -n "$cname" ] && [ -f "supabase/baseline.sql" ]; then
-      docker exec -i "$cname" psql -U postgres -d postgres -f - < supabase/baseline.sql || true
+      # PG15 compat guard: pg_dump from PostgreSQL 16+ (newer Supabase cloud)
+      # emits the MAINTAIN privilege in table GRANTs. It does not exist in the
+      # PG15 self-hosted image (supabase/postgres:15.x) and would abort the
+      # apply with 'unrecognized privilege type "maintain"'. Strip only that
+      # privilege — app roles never run VACUUM/ANALYZE, so the remaining GRANT
+      # is functionally identical. Same guard as in install.sh.
+      sed -e 's/GRANT MAINTAIN ON TABLE/GRANT SELECT ON TABLE/g' \
+          -e 's/MAINTAIN,//g' \
+          -e 's/,MAINTAIN//g' supabase/baseline.sql \
+        | docker exec -i "$cname" psql -U postgres -d postgres -f - || true
       for sql_file in supabase/migrations/*.sql; do
         if [ -f "$sql_file" ]; then
           docker exec -i "$cname" psql -U postgres -d postgres -f - < "$sql_file" || true
