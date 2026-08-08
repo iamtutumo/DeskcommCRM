@@ -33,7 +33,7 @@ services:
       # a stack da fusão é isolada do checkout principal (3001 é do gov-loop).
       WEBHOOK_GLOBAL_ENABLED: "true"
       WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
-      WEBHOOK_GLOBAL_URL: ${EVOLUTION_WEBHOOK_BASE_URL:-http://host.docker.internal:3003}/api/v1/webhooks/waha
+      WEBHOOK_GLOBAL_URL: ${EVOLUTION_WEBHOOK_BASE_URL:-http://host.docker.internal:3003}/api/v1/webhooks/evolution
       # Cache local (a stack dev não sobe redis dedicado). Em prod usa-se o redis.
       CACHE_LOCAL_ENABLED: "true"
       CACHE_REDIS_ENABLED: "false"

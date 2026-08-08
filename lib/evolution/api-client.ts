@@ -118,14 +118,31 @@ export class EvolutionApiClient {
     fileName: string,
     caption?: string,
   ): Promise<EvolutionMessageResponse> {
+    return this.sendMedia(number, "document", mediaUrlOrBase64, fileName, caption);
+  }
+
+  /**
+   * Sends media of any supported type via the Evolution API `sendMedia` route.
+   *
+   * `mediatype` is one of `image | document | video | audio`. `media` accepts a
+   * public URL or a base64 data string; Evolution downloads/uploads it server-side.
+   * `fileName` is required for `document`; for `audio` a caption is ignored.
+   */
+  async sendMedia(
+    number: string,
+    mediatype: "image" | "document" | "video" | "audio",
+    mediaUrlOrBase64: string,
+    fileName?: string,
+    caption?: string,
+  ): Promise<EvolutionMessageResponse> {
     const cleanNumber = number.replace(/\D/g, "");
     const payload: EvolutionSendMediaRequest = {
       number: cleanNumber,
       mediaMessage: {
-        mediatype: "document",
+        mediatype,
         media: mediaUrlOrBase64,
-        fileName,
-        caption,
+        ...(fileName ? { fileName } : {}),
+        ...(caption ? { caption } : {}),
       },
     };
 

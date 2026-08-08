@@ -73,7 +73,7 @@ services:
       # app; ao plugar o app na Evolution, ajustar p/ a rota nova (fora deste escopo).
       WEBHOOK_GLOBAL_ENABLED: "true"
       WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
-      WEBHOOK_GLOBAL_URL: ${EVOLUTION_WEBHOOK_BASE_URL:-http://app:3000}/api/v1/webhooks/waha
+      WEBHOOK_GLOBAL_URL: ${EVOLUTION_WEBHOOK_BASE_URL:-http://app:3000}/api/v1/webhooks/evolution
       # Cache: reutiliza o redis da stack (a Evolution usa o banco index 6).
       CACHE_REDIS_ENABLED: "true"
       CACHE_REDIS_URI: redis://redis:6379/6
