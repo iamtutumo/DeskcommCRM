@@ -30,16 +30,16 @@ NONINTERACTIVE=0
 # numa, mexa na outra.
 dc() {
   if [ "${REVERSE_PROXY:-caddy}" = "traefik" ]; then
-    docker compose -f "$COMPOSE" -f "$COMPOSE_TRAEFIK" "$@"
+    docker compose -f "$COMPOSE" -f "$COMPOSE_TRAEFIK" -f docker-compose.selfhost-supabase.yml "$@"
   else
-    docker compose -f "$COMPOSE" "$@"
+    docker compose -f "$COMPOSE" -f docker-compose.selfhost-supabase.yml "$@"
   fi
 }
 dc_files() {
   if [ "${REVERSE_PROXY:-caddy}" = "traefik" ]; then
-    printf -- '-f %s -f %s' "$COMPOSE" "$COMPOSE_TRAEFIK"
+    printf -- '-f %s -f %s -f docker-compose.selfhost-supabase.yml' "$COMPOSE" "$COMPOSE_TRAEFIK"
   else
-    printf -- '-f %s' "$COMPOSE"
+    printf -- '-f %s -f docker-compose.selfhost-supabase.yml' "$COMPOSE"
   fi
 }
 
@@ -125,8 +125,8 @@ banner() {
 LOGO
   fi
   printf '\n'
-  c_dim "  Agentes de IA que atendem no WhatsApp, dentro do seu CRM."
-  c_dim "  Open-source · roda no seu servidor · os dados são seus."
+  c_dim "  AI Agents that serve on WhatsApp, inside your CRM."
+  c_dim "  Open-source · runs on your server · your data is yours."
 }
 
 # ── Rede de segurança: nenhuma saída silenciosa ─────────────────────────────
@@ -139,7 +139,7 @@ show_recovery() {
   local dir="${PROJECT_DIR:-$(pwd)}"
   c_red ""
   c_red "═══════════════════════════════════════════════════════"
-  c_red " A instalação parou. Nada ficou pela metade sem conserto."
+  c_red " Installation stopped. Nothing was left broken."
   c_red "═══════════════════════════════════════════════════════"
   printf '\n%s\n\n' "Como voltar atrás e recomeçar do zero:"
   printf '  %s\n' "cd ${dir}"
@@ -240,7 +240,7 @@ v_sb_key() {
   fi
   case "$code" in
     2*) return 0;;
-    000) c_ylw "  ⚠ não consegui checar a chave online (sem resposta do Supabase); sigo com ela."; return 0;;
+    000) c_ylw "  ⚠ could not check key online (sem resposta do Supabase); continuing with it."; return 0;;
     401|403) echo "O Supabase recusou essa chave (resposta ${code}). Confira se copiou a '${want}' inteira, sem espaço no fim."; return 1;;
     *) echo "Resposta inesperada do Supabase ao testar a chave (${code}). Confira a chave e o projeto."; return 1;;
   esac
@@ -283,7 +283,7 @@ v_db_url() {
       fi;;
   esac
   local out
-  if out="$(docker run --rm postgres:17-alpine psql "$1" -tAc 'select 1' 2>&1)"; then
+  if out="$(docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -tAc 'select 1' 2>&1)"; then
     return 0
   fi
   echo "Não consegui conectar no banco. O Postgres respondeu:"
@@ -308,9 +308,9 @@ v_anthropic() {
     -H "x-api-key: $1" -H "anthropic-version: 2023-06-01" 2>/dev/null || echo 000)"
   case "$code" in
     2*) return 0;;
-    000) c_ylw "  ⚠ não consegui checar a chave online; sigo com ela."; return 0;;
+    000) c_ylw "  ⚠ could not check key online; continuing with it."; return 0;;
     401) echo "A Anthropic recusou essa chave (401). Confira se está ativa e se copiou inteira."; return 1;;
-    *)   c_ylw "  ⚠ a Anthropic respondeu ${code} ao testar a chave; sigo com ela."; return 0;;
+    *)   c_ylw "  ⚠ a Anthropic respondeu ${code} ao testar a chave; continuing with it."; return 0;;
   esac
 }
 
@@ -322,9 +322,9 @@ v_openai() {
     -H "Authorization: Bearer $1" 2>/dev/null || echo 000)"
   case "$code" in
     2*) return 0;;
-    000) c_ylw "  ⚠ não consegui checar a chave online; sigo com ela."; return 0;;
+    000) c_ylw "  ⚠ could not check key online; continuing with it."; return 0;;
     401) echo "A OpenAI recusou essa chave (401). Confira se está ativa e se copiou inteira."; return 1;;
-    *)   c_ylw "  ⚠ a OpenAI respondeu ${code} ao testar a chave; sigo com ela."; return 0;;
+    *)   c_ylw "  ⚠ a OpenAI respondeu ${code} ao testar a chave; continuing with it."; return 0;;
   esac
 }
 
@@ -363,7 +363,7 @@ ask_one() {
     input="${input:-$default}"
     if [ -z "$input" ]; then
       [ -n "$optional" ] && { printf -v "$var" '%s' ""; return 0; }
-      c_red "  Esse campo é obrigatório. (digite 'voltar' para refazer a pergunta anterior)"
+      c_red "  This field is required. (type 'back' to redo the previous question)"
       continue
     fi
     # Campo secreto não ecoa o que foi colado — a pessoa não vê se colou, então
@@ -373,7 +373,7 @@ ask_one() {
     if [ "$secret" = "secret" ]; then
       local len=${#input} half=$(( ${#input} / 2 ))
       if [ $((len % 2)) -eq 0 ] && [ "${input:0:half}" = "${input:half}" ]; then
-        c_red "  Esse valor parece ter sido colado 2x seguidas (o campo é secreto e não mostra o que você cola). Cole uma vez só."
+        c_red "  This value seems to have been pasted twice (o campo é secreto e não mostra o que você cola). Cole uma vez só."
         continue
       fi
     fi
@@ -611,7 +611,7 @@ banner
 
 # ── 1. Preflight ────────────────────────────────────────────────────────────
 fase 1 "Preparando o servidor"
-step "Verificando dependências"
+step "Checking dependencies"
 
 # VPS "cru" (Hetzner, DigitalOcean, Contabo…) não vem com Docker. Antes isto era
 # um beco sem saída: o script morria dizendo "instale antes de continuar" e a
@@ -624,26 +624,26 @@ step "Verificando dependências"
 # alguém sem avisar é abuso de confiança); com --yes segue direto, que é o
 # contrato desse modo.
 if ! command -v docker >/dev/null 2>&1; then
-  c_ylw "⚠ Docker não está instalado — é o motor que roda o CRM."
+  c_ylw "⚠ Docker is not installed — it is the engine that runs the CRM."
   instalar=1
   if [ "$NONINTERACTIVE" = 0 ]; then
     read -r -p "  Posso instalar agora? (S/n) " r
     case "${r:-S}" in [Nn]*) instalar=0;; esac
   fi
   if [ "$instalar" = 1 ]; then
-    c_dim "  Instalando (get.docker.com — o instalador oficial). Leva 1-2 minutos…"
+    c_dim "  Installing (get.docker.com). Takes 1-2 minutes..."
     # A saída vai para um log em vez de /dev/null: silenciar o stderr também
     # deixava a falha MUDA (disco cheio, apt travado, arquitetura sem pacote
     # viravam todos a mesma frase genérica) — exatamente o que o trap lá em cima
     # existe para impedir. Tela limpa no caminho feliz, causa real no caminho ruim.
     _docker_log="$(mktemp)"
     if ! curl -fsSL https://get.docker.com | sh >"$_docker_log" 2>&1; then
-      c_red "  Últimas linhas do instalador do Docker:"; tail -15 "$_docker_log" >&2
+      c_red "  Last lines of Docker installer:"; tail -15 "$_docker_log" >&2
       die "Não consegui instalar o Docker (log em $_docker_log). Rode 'curl -fsSL https://get.docker.com | sh' e tente de novo."
     fi
     rm -f "$_docker_log"; unset _docker_log
     command -v docker >/dev/null 2>&1 || die "Docker instalou mas não ficou no PATH. Reabra o terminal e rode de novo."
-    c_grn "✓ Docker instalado"
+    c_grn "✓ Docker installed"
   else
     die "Sem Docker não dá para seguir. Instale com: curl -fsSL https://get.docker.com | sh"
   fi
@@ -663,20 +663,20 @@ c_grn "✓ docker, git, openssl, curl ok"
 if [ -r /proc/meminfo ]; then
   mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo)
   if ram_abaixo_do_recomendado "$mem_kb"; then
-    c_ylw "⚠ Este servidor tem ~$((mem_kb/1024))MB de RAM. O CRM sobe, mas fica no limite:"
-    c_ylw "  são 7 contêineres e o WhatsApp usa ~150MB por número conectado."
-    c_ylw "  Adicione swap antes de operar — ver docs/runbooks/waha-hostgator.md."
+    c_ylw "⚠ This server has ~$((mem_kb/1024))MB de RAM. The CRM will start, but will be at the limit:"
+    c_ylw "  there are 7 containers and WhatsApp uses ~150MB por número conectado."
+    c_ylw "  Add swap before operating — ver docs/runbooks/waha-hostgator.md."
   fi
 fi
 
 # ── 2. Repositório ──────────────────────────────────────────────────────────
-step "Localizando o projeto"
+step "Locating the project"
 if [ -f "$COMPOSE" ]; then
-  c_grn "✓ rodando dentro do repositório"
+  c_grn "✓ running inside the repository"
 elif [ -f "$REPO_DIR/$COMPOSE" ]; then
-  cd "$REPO_DIR"; c_grn "✓ repositório em ./$REPO_DIR"
+  cd "$REPO_DIR"; c_grn "✓ repository at ./$REPO_DIR"
 else
-  c_ylw "Clonando $REPO_URL ..."
+  c_ylw "Cloning $REPO_URL ..."
   git clone --depth 1 "$REPO_URL" "$REPO_DIR"
   cd "$REPO_DIR"
 fi
@@ -685,15 +685,42 @@ source "$KIT_DIR/_common.sh"
 
 # ── 3. Coleta de config ─────────────────────────────────────────────────────
 fase 2 "Suas informações"
-step "Configuração"
+
+# Auto-generate Self-Hosted Supabase Credentials
+generate_jwt() {
+  local role="$1" secret="$2"
+  local header='{"alg":"HS256","typ":"JWT"}'
+  local payload
+  if [ "$role" = "service_role" ]; then
+    payload='{"role":"service_role","iss":"supabase","iat":1700000000,"exp":2000000000}'
+  else
+    payload='{"role":"anon","iss":"supabase","iat":1700000000,"exp":2000000000}'
+  fi
+  local h_b64 p_b64 sig
+  h_b64="$(printf '%s' "$header" | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')"
+  p_b64="$(printf '%s' "$payload" | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')"
+  sig="$(printf '%s.%s' "$h_b64" "$p_b64" | openssl dgst -sha256 -hmac "$secret" -binary | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')"
+  printf '%s.%s.%s' "$h_b64" "$p_b64" "$sig"
+}
+if [ -z "${NEXT_PUBLIC_SUPABASE_URL:-}" ]; then
+    export SB_PG_PASS="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32 || echo 'DeskcommPgSecret2026Secure')"
+    export JWT_SECRET="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 40 || echo 'DeskcommJwtSecretTokenWithAtLeast32CharsLong2026')"
+    export NEXT_PUBLIC_SUPABASE_ANON_KEY="$(generate_jwt "anon" "$JWT_SECRET")"
+    export SUPABASE_SERVICE_ROLE_KEY="$(generate_jwt "service_role" "$JWT_SECRET")"
+    export NEXT_PUBLIC_SUPABASE_URL="https://${DOMAIN}/supabase"
+    export SUPABASE_DB_URL="postgresql://postgres:${SB_PG_PASS}@supabase-db:5432/postgres"
+    export SELF_HOSTED_SUPABASE=true
+fi
+
+step "Configuration"
 # Se já existe .env, carrega pra não repetir perguntas (idempotência).
-if [ -f .env ]; then load_env .env; c_grn "✓ .env existente carregado"; fi
+if [ -f .env ]; then load_env .env; c_grn "✓ .env existing loaded"; fi
 # Respostas guardadas de uma tentativa que não chegou ao fim. Carregam DEPOIS do
 # .env de propósito: se as duas fontes têm a chave, a mais recente é esta.
 if [ -f "$PARTIAL_FILE" ]; then
   load_env "$PARTIAL_FILE"
-  c_grn "✓ retomando: $(grep -c '=' "$PARTIAL_FILE" 2>/dev/null || echo 0) resposta(s) guardadas da tentativa anterior"
-  c_dim "  (para responder tudo de novo do zero: rm $PARTIAL_FILE)"
+  c_grn "✓ resuming: $(grep -c '=' "$PARTIAL_FILE" 2>/dev/null || echo 0) response(s) saved from previous attempt"
+  c_dim "  (to answer everything again from scratch: rm $PARTIAL_FILE)"
 fi
 
 # ── Proxy reverso: quem está com as portas 80 e 443? ────────────────────────
@@ -916,20 +943,20 @@ escolher_provedor() {
     return 0
   fi
 
-  printf '\n\033[1mQual inteligência artificial vai atender seus clientes?\033[0m\n\n'
-  printf '  [1] OpenRouter  — uma chave, centenas de modelos de vários fabricantes.\n'
-  printf '                    O caminho mais simples para experimentar. (openrouter.ai/keys)\n'
-  printf '  [2] Anthropic   — o Claude. É o que melhor segue instruções longas e usa\n'
-  printf '                    as ferramentas do CRM. (console.anthropic.com)\n'
+  printf '\n\033[1mWhich AI will serve your customers?\033[0m\n\n'
+  printf '  [1] OpenRouter  — one key, hundreds of models from various vendors.\n'
+  printf '                    The simplest way to experiment. (openrouter.ai/keys)\n'
+  printf '  [2] Anthropic   — o Claude. Best at following long instructions and using\n'
+  printf '                    CRM tools. (console.anthropic.com)\n'
   printf '  [3] OpenAI      — o GPT. (platform.openai.com/api-keys)\n'
   printf '\n'
-  printf '  Dá para trocar depois, e por parte do sistema, em Agente de IA → Provedores.\n\n'
+  printf '  You can change this later in the system under AI Agent -> Providers.\n\n'
 
   local padrao_num=2
   case "$atual" in openrouter) padrao_num=1;; openai) padrao_num=3;; esac
 
   while :; do
-    if ! read -r -p "Escolha (Enter = ${padrao_num}): " escolha; then escolha=""; fi
+    if ! read -r -p "Choice (Enter = ${padrao_num}): " escolha; then escolha=""; fi
     [ -z "$escolha" ] && escolha="$padrao_num"
     case "$escolha" in
       1) AI_PROVIDER="openrouter"; break;;
@@ -958,30 +985,27 @@ esac
 if [ "$AI_PROVIDER" = "openai" ]; then
   CAMPO_OPENAI_EXTRA=""
 else
-  CAMPO_OPENAI_EXTRA="OPENAI_API_KEY|Chave da OpenAI — só para ouvir áudios e usar a base de conhecimento (Enter pula)||v_openai|secret|opcional"
+  CAMPO_OPENAI_EXTRA="OPENAI_API_KEY|OpenAI Key — only for audio and knowledge base (Enter to skip)||v_openai|secret|opcional"
 fi
 
 FIELDS=(
-  "DOMAIN|Domínio do CRM (ex: crm.suaempresa.com.br)||v_domain||"
-  "ACME_EMAIL|Seu e-mail (avisos de SSL)||v_email||"
-  "APP_IMAGE|Imagem Docker do app|ghcr.io/melgarafael/deskcommcrm:latest|||"
-  "NEXT_PUBLIC_SUPABASE_URL|Supabase Project URL (Settings > API)||v_supabase_url||"
-  "NEXT_PUBLIC_SUPABASE_ANON_KEY|Supabase anon key (Settings > API)||v_anon||"
-  "SUPABASE_SERVICE_ROLE_KEY|Supabase service_role key (Settings > API)||v_service|secret|"
-  "SUPABASE_DB_URL|Supabase connection string — Session pooler, modo URI (Settings > Database)||v_db_url|secret|"
+  "DOMAIN|CRM Domain (ex: crm.yourcompany.com)||v_domain||"
+  "ACME_EMAIL|Your email (for SSL alerts)||v_email||"
+  "APP_IMAGE|App Docker image|ghcr.io/melgarafael/deskcommcrm:latest|||"
+
   "$CAMPO_IA"
   ${CAMPO_OPENAI_EXTRA:+"$CAMPO_OPENAI_EXTRA"}
-  "OWNER_EMAIL|E-mail do primeiro admin (dono)||v_email||"
-  "OWNER_PASSWORD|Senha do primeiro admin (mínimo 8 caracteres)||v_password|secret|"
-  "APP_NAME|Nome que aparece na interface (Enter para o padrão)|DeskcommCRM|||"
+  "OWNER_EMAIL|First admin email (owner)||v_email||"
+  "OWNER_PASSWORD|First admin password (min 8 chars)||v_password|secret|"
+  "APP_NAME|Name displayed in the UI (Enter for default)|DeskcommCRM|||"
 )
 
 field_at() { IFS='|' read -r F_VAR F_PROMPT F_DEF F_VAL F_SEC F_OPT <<< "${FIELDS[$1]}"; }
 
 if [ "$NONINTERACTIVE" = 0 ]; then
-  c_dim "Dica: em qualquer pergunta, digite 'voltar' para refazer a anterior."
+  c_dim "Tip: on any question, type 'back' to redo the previous one."
   if [ "$AI_PROVIDER" != "openai" ]; then
-    c_ylw "A chave da OpenAI é opcional, mas sem ela a IA não ouve áudio nem consulta a base de conhecimento."
+    c_ylw "The OpenAI key is optional, but without it the AI will not listen to audio or query the knowledge base."
   fi
 fi
 
@@ -1212,6 +1236,9 @@ fi
   envq TRAEFIK_ENTRYPOINT_HTTP "${TRAEFIK_ENTRYPOINT_HTTP:-web}"
   envq TRAEFIK_ENTRYPOINT "${TRAEFIK_ENTRYPOINT:-websecure}"
   envq TRAEFIK_CERTRESOLVER "${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+  envq SELF_HOSTED_SUPABASE "${SELF_HOSTED_SUPABASE:-}"
+  envq POSTGRES_PASSWORD "${SB_PG_PASS:-}"
+  envq JWT_SECRET "${JWT_SECRET:-}"
   envq NEXT_PUBLIC_SUPABASE_URL "$NEXT_PUBLIC_SUPABASE_URL"
   envq NEXT_PUBLIC_SUPABASE_ANON_KEY "$NEXT_PUBLIC_SUPABASE_ANON_KEY"
   envq SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
@@ -1300,7 +1327,7 @@ else
   # qualquer outra coisa matava a instalação. Agora o padrão é esperar junto com
   # a pessoa: Enter reconsulta, e sair é uma escolha explícita dela.
   while [ "$NONINTERACTIVE" = 0 ]; do
-    c_ylw "⚠ ${DOMAIN} resolve para '${resolved:-nada}' e o IP deste VPS é '${public_ip:-desconhecido}'."
+    c_ylw "⚠ ${DOMAIN} resolve para '${resolved:-nada}' e this VPS IP é '${public_ip:-desconhecido}'."
     c_ylw "  O SSL (Let's Encrypt) só será emitido quando o A-record apontar pra cá."
     printf '\n%s\n'   "  No painel do seu domínio, crie um registro A apontando ${DOMAIN}"
     printf '%s\n\n'   "  para ${public_ip:-o IP deste servidor}. Costuma valer em poucos minutos."
@@ -1323,17 +1350,27 @@ else
 fi
 
 # ── 7. Aplica o schema (baseline) no Supabase — via container postgres ───────
-step "Aplicando o schema no Supabase (baseline.sql)"
+
+step "Starting Self-Hosted Supabase"
+# Stop existing just in case
+dc stop supabase-db supabase-kong supabase-rest supabase-auth supabase-storage || true
+dc up -d supabase-db
+c_dim "Waiting for self-hosted DB to be ready..."
+sleep 10
+# Also inject the env variables explicitly for the DB run
+export POSTGRES_PASSWORD="$SB_PG_PASS"
+
+step "Applying schema in Supabase (baseline.sql)"
 if [ -f supabase/baseline.sql ]; then
   # O baseline é um pg_dump: referencia public.vector, public.citext e gin_trgm_ops
   # (pg_trgm) mas NÃO cria as extensões. Supabase não as habilita no schema public por
   # padrão — criamos aqui, senão o schema quebra no meio (ex.: "type public.vector does
   # not exist"). Idempotente (if not exists).
-  docker run --rm postgres:17-alpine psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c \
+  docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c \
     "create extension if not exists vector with schema public; create extension if not exists citext with schema public; create extension if not exists pg_trgm with schema public;" \
     >/dev/null 2>&1 \
-    && c_grn "✓ extensões (vector, citext, pg_trgm) habilitadas no public" \
-    || c_ylw "⚠ não consegui habilitar as extensões — o schema pode falhar abaixo."
+    && c_grn "✓ extensions (vector, citext, pg_trgm) enabled in public" \
+    || c_ylw "⚠ could not enable extensions — schema might fail below."
   SCHEMA_LOG="$PROJECT_DIR/baseline-apply.log"
   # Banco novo ou re-execução? Re-aplicar com ON_ERROR_STOP pararia no primeiro
   # "já existe" (ex.: multiple primary keys) e PULARIA o resto do arquivo —
@@ -1344,35 +1381,33 @@ if [ -f supabase/baseline.sql ]; then
   # dentro da substituição e, com `set -e` + `pipefail`, derruba o instalador sem
   # imprimir nada (o 2>/dev/null já tinha engolido a causa). Preferimos seguir e
   # deixar o erro aparecer no ponto em que dá para explicá-lo.
-  has_schema="$(docker run --rm postgres:17-alpine psql "$SUPABASE_DB_URL" -tAc \
+  has_schema="$(docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -tAc \
     "select 1 from information_schema.tables where table_schema='public' and table_name='organizations' limit 1" 2>/dev/null | tr -d '[:space:]' || true)"
 
   if [ "$has_schema" = "1" ]; then
-    c_ylw "• schema já existe — re-aplicando em modo update (erros 'já existe' são esperados e ficam no log)"
-    raw="$(docker run --rm -i -v "$PROJECT_DIR/supabase/baseline.sql:/baseline.sql:ro" \
-          postgres:17-alpine psql "$SUPABASE_DB_URL" -q -f /baseline.sql 2>&1 || true)"
+    c_ylw "• schema already exists — reapplying in update mode (erros 'já existe' são esperados e ficam no log)"
+    raw="$(docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -q -f /dev/stdin < "$PROJECT_DIR/supabase/baseline.sql" 2>&1 || true)"
     printf '%s\n' "$raw" > "$SCHEMA_LOG"
     benign='already exists|multiple primary keys|multiple default values|is already a member|already a partition'
     unexpected="$(printf '%s\n' "$raw" | grep -iE 'ERROR|FATAL' | grep -viE "$benign" || true)"
     if [ -n "$unexpected" ]; then
-      c_ylw "⚠ Erros no banco que NÃO são os esperados (log completo: $SCHEMA_LOG):"
+      c_ylw "⚠ Database errors that are NOT expected (log completo: $SCHEMA_LOG):"
       printf '%s\n' "$unexpected" | head -20
     else
-      c_grn "✓ schema re-aplicado (apêndice de migrations incluído)"
+      c_grn "✓ schema re-applied (migrations appendix included)"
     fi
   else
-    if docker run --rm -i -v "$PROJECT_DIR/supabase/baseline.sql:/baseline.sql:ro" \
-        postgres:17-alpine psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f /baseline.sql \
+    if docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f /dev/stdin < "$PROJECT_DIR/supabase/baseline.sql" \
         > "$SCHEMA_LOG" 2>&1; then
-      c_grn "✓ schema aplicado (log: $SCHEMA_LOG)"
+      c_grn "✓ schema applied (log: $SCHEMA_LOG)"
     else
       tail -5 "$SCHEMA_LOG"
-      die "baseline falhou num banco NOVO — o schema ficaria incompleto (sem RLS). Log completo: $SCHEMA_LOG"
+      die "baseline failed on a NEW database — o schema ficaria incompleto (sem RLS). Log completo: $SCHEMA_LOG"
     fi
   fi
 
   # Verificação real, não wishful thinking: o app precisa das tabelas core.
-  n_tables="$(docker run --rm postgres:17-alpine psql "$SUPABASE_DB_URL" -tAc \
+  n_tables="$(docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -tAc \
     "select count(*) from information_schema.tables where table_schema='public'" 2>/dev/null | tr -d '[:space:]')"
   if [ "${n_tables:-0}" -ge 30 ]; then
     c_grn "✓ verificação: ${n_tables} tabelas no schema public"
@@ -1397,9 +1432,9 @@ curl -fsS -X POST "${NEXT_PUBLIC_SUPABASE_URL}/auth/v1/admin/users" \
 # 2) Resolve o id direto do auth.users e cria org + membership + platform_admin.
 #    Resolver o uid DENTRO do SQL evita parsing frágil de JSON e funciona tanto para
 #    usuário recém-criado quanto para um que já existia (re-execução).
-docker run --rm -i postgres:17-alpine psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 <<SQL \
-  && c_grn "✓ dono criado e promovido a super-admin" \
-  || die "Não consegui promover o admin. Confira a service_role key, a URL e a connection string do Supabase."
+docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<SQL \
+  && c_grn "✓ owner created and promoted to super-admin" \
+  || die "Could not promote admin. Confira a service_role key, a URL e a connection string do Supabase."
 do \$\$
 declare v_org uuid; v_uid uuid;
 begin
@@ -1427,21 +1462,21 @@ fase 4 "Colocando o CRM no ar"
 step "Puxando a imagem e subindo os serviços"
 dc pull
 dc up -d
-c_grn "✓ containers no ar"
+c_grn "✓ containers up"
 
 # ── 10. Healthcheck ─────────────────────────────────────────────────────────
 step "Aguardando o app ficar saudável"
 # Antes isto abria um socket na porta 3000 e dava por bom. A porta abre assim
 # que o Node sobe, então o "✓" saía com o app ainda sem banco — e o bloco
-# "Instalação concluída!" saía logo atrás, incondicionalmente. Um falso verde
+# "Installation complete!" saía logo atrás, incondicionalmente. Um falso verde
 # no exato momento em que a pessoa decide se confia no produto. Agora o critério
 # é o mesmo do update.sh: a rota /api/v1/health responder "status":"ok".
 if health_body="$(wait_app_healthy 30 3)"; then
   APP_SAUDAVEL=1
-  c_grn "✓ app no ar e saudável"
+  c_grn "✓ app is up and healthy"
 else
   APP_SAUDAVEL=0
-  c_ylw "⚠ os contêineres subiram, mas o app não respondeu que está saudável."
+  c_ylw "⚠ containers are up, but app didn't respond healthy."
   # "|| true": mesma família do pipe que matava o supabase-provision.sh — o
   # corpo passa de 200 bytes, o head fecha o pipe e o printf leva SIGPIPE.
   [ -n "$health_body" ] && c_dim "  última resposta: $(printf '%s' "$health_body" | head -c 200 || true)"
@@ -1454,7 +1489,7 @@ setup_event_log_drain_cron
 setup_update_agent_cron
 
 # ── Final ───────────────────────────────────────────────────────────────────
-# O app não confirmou que está de pé: dizer "Instalação concluída!" aqui seria
+# O app não confirmou que está de pé: dizer "Installation complete!" aqui seria
 # mentir na única tela que a pessoa vai ler inteira. Ela recebe o estado real e
 # o caminho de diagnóstico — e não a receita de apagar tudo do show_recovery,
 # que existe para quem parou no MEIO. Aqui nada ficou pela metade: a config
@@ -1463,7 +1498,7 @@ if [ "${APP_SAUDAVEL:-0}" != 1 ]; then
   cat <<INCOMPLETO
 
 $(c_ylw "═══════════════════════════════════════════════════════")
-$(c_ylw " Quase lá — falta o app responder")
+$(c_ylw " Almost there — waiting for app to respond")
 $(c_ylw "═══════════════════════════════════════════════════════")
 
   A configuração está salva e os contêineres estão no ar. Você NÃO precisa
@@ -1497,7 +1532,7 @@ fi
 cat <<DONE
 
 $(c_grn "═══════════════════════════════════════════════════════")
-$(c_grn " Instalação concluída!")
+$(c_grn " Installation complete!")
 $(c_grn "═══════════════════════════════════════════════════════")
 
   1. Acesse:  https://${DOMAIN}

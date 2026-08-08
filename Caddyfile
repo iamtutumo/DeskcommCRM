@@ -29,6 +29,11 @@
 		@waha_global path /api/v1/webhooks/waha
 		respond @waha_global 403
 
+				# Supabase proxy
+		handle_path /supabase/* {
+			reverse_proxy supabase-kong:8000
+		}
+
 		# O runner de agente de IA (ToolLoop) pode levar até ~5min por requisição.
 		# Timeout estendido só nessa rota pra o proxy não cortar a resposta longa.
 		@agentrun path /api/internal/agents/run*
