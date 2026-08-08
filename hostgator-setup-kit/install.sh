@@ -961,10 +961,13 @@ escolher_provedor
 
 # O campo da chave do provedor ESCOLHIDO — e só dele. Pedir as três faria a
 # pessoa achar que precisa das três.
+# Marcamos como opcional (6º campo = "opcional"): quem ainda não tem conta em
+# provedor de IA pode instalar e configurar depois em IA › Provedores. Sem chave
+# o agente não responde mensagens, mas o resto da instalação continua válido.
 case "$AI_PROVIDER" in
-  openrouter) CAMPO_IA="OPENROUTER_API_KEY|Chave da OpenRouter — a IA que atende (openrouter.ai/keys)||v_openrouter|secret|";;
-  openai)     CAMPO_IA="OPENAI_API_KEY|Chave da OpenAI — a IA que atende (platform.openai.com/api-keys)||v_openai|secret|";;
-  *)          CAMPO_IA="ANTHROPIC_API_KEY|Chave da Anthropic — a IA que atende (console.anthropic.com)||v_anthropic|secret|";;
+  openrouter) CAMPO_IA="OPENROUTER_API_KEY|Chave da OpenRouter — a IA que atende (openrouter.ai/keys)||v_openrouter|secret|opcional";;
+  openai)     CAMPO_IA="OPENAI_API_KEY|Chave da OpenAI — a IA que atende (platform.openai.com/api-keys)||v_openai|secret|opcional";;
+  *)          CAMPO_IA="ANTHROPIC_API_KEY|Chave da Anthropic — a IA que atende (console.anthropic.com)||v_anthropic|secret|opcional";;
 esac
 
 # A chave da OpenAI é pedida À PARTE quando ela NÃO é o provedor de conversa,
@@ -995,8 +998,9 @@ field_at() { IFS='|' read -r F_VAR F_PROMPT F_DEF F_VAL F_SEC F_OPT <<< "${FIELD
 
 if [ "$NONINTERACTIVE" = 0 ]; then
   c_dim "Tip: on any question, type 'back' to redo the previous one."
+  c_ylw "The AI provider key is optional — leave blank to configure later in the system under AI Agent -> Providers."
   if [ "$AI_PROVIDER" != "openai" ]; then
-    c_ylw "The OpenAI key is optional, but without it the AI will not listen to audio or query the knowledge base."
+    c_ylw "The OpenAI key is also optional, but without it the AI will not listen to audio or query the knowledge base."
   fi
 fi
 
