@@ -351,12 +351,12 @@ cron_merge() {  # cron_merge <marcador> <assinatura_legada> <linha_nova>
 }
 
 setup_event_log_drain_cron() {
-  command -v crontab >/dev/null 2>&1 || { c_ylw "⚠ 'crontab' não encontrado — instale o pacote 'cron' e rode de novo pra ativar as automações."; return 0; }
+  command -v crontab >/dev/null 2>&1 || { c_ylw "⚠ 'crontab' not found — install the 'cron' package and run again to enable automations."; return 0; }
 
   local secret="${INTERNAL_CRON_SECRET:-}"
   [ -n "$secret" ] || secret="${INTERNAL_SECRET:-}"
-  [ -n "$secret" ] || { c_ylw "⚠ falta INTERNAL_SECRET/INTERNAL_CRON_SECRET — não ativei o cron das automações."; return 0; }
-  [ -n "${NEXT_PUBLIC_APP_URL:-}" ] || { c_ylw "⚠ falta NEXT_PUBLIC_APP_URL — não ativei o cron das automações."; return 0; }
+  [ -n "$secret" ] || { c_ylw "⚠ missing INTERNAL_SECRET/INTERNAL_CRON_SECRET — did not activate automations cron."; return 0; }
+  [ -n "${NEXT_PUBLIC_APP_URL:-}" ] || { c_ylw "⚠ missing NEXT_PUBLIC_APP_URL — did not activate automations cron."; return 0; }
 
   local url_drain="${NEXT_PUBLIC_APP_URL}/api/v1/cron/event-log-drain"
   local marcador; marcador="$(cron_tag drain)"
@@ -369,7 +369,7 @@ setup_event_log_drain_cron() {
 
   local cron_line="* * * * * curl -fsS -H \"Authorization: Bearer ${secret}\" \"${url_drain}\" >/dev/null 2>&1 ${marcador}"
   ( crontab -l 2>/dev/null | cron_merge "$marcador" "$url_drain" "$cron_line" ) | crontab -
-  c_grn "✓ automações ativas (cron do event-log-drain, a cada minuto)"
+  c_grn "✓ automations active (event-log-drain cron, every minute)"
 
   if [ "$first_time" = 1 ]; then
     # 1ª ativação do cron (inclusive numa instalação já existente que nunca
@@ -381,8 +381,8 @@ setup_event_log_drain_cron() {
     step "Higienizando eventos pendentes antigos (1ª ativação do cron)"
     psql_run -c "update event_log set status='done', updated_at=now() where status='pending' and created_at < now() - interval '7 days';" \
       >/dev/null 2>&1 \
-      && c_grn "✓ eventos pendentes com mais de 7 dias marcados como concluídos" \
-      || c_ylw "⚠ não consegui higienizar eventos antigos — confira manualmente a tabela event_log se necessário."
+      && c_grn "✓ pending events older than 7 days marked as completed" \
+      || c_ylw "⚠ could not sanitize old events — check event_log table manually if necessary."
   fi
 }
 
@@ -393,10 +393,10 @@ setup_event_log_drain_cron() {
 # sempre. Chamada por install.sh e update.sh (bloco 7) — re-rodar não duplica
 # a linha do crontab.
 setup_update_agent_cron() {
-  command -v crontab >/dev/null 2>&1 || { c_ylw "⚠ 'crontab' não encontrado — o botão de atualizar pela tela não vai funcionar."; return 0; }
+  command -v crontab >/dev/null 2>&1 || { c_ylw "⚠ 'crontab' not found — the UI update button will not work."; return 0; }
   local secret="${INTERNAL_CRON_SECRET:-${INTERNAL_SECRET:-}}"
-  [ -n "$secret" ] || { c_ylw "⚠ falta INTERNAL_SECRET — não ativei o agente de atualização."; return 0; }
-  [ -n "${NEXT_PUBLIC_APP_URL:-}" ] || { c_ylw "⚠ falta NEXT_PUBLIC_APP_URL — não ativei o agente de atualização."; return 0; }
+  [ -n "$secret" ] || { c_ylw "⚠ missing INTERNAL_SECRET — did not activate update agent."; return 0; }
+  [ -n "${NEXT_PUBLIC_APP_URL:-}" ] || { c_ylw "⚠ missing NEXT_PUBLIC_APP_URL — did not activate update agent."; return 0; }
 
   # `cd` explícito: o agent.sh chama enter_project(), que acha o projeto pelo
   # DIRETÓRIO CORRENTE. No cron o CWD é o home do dono do crontab — sem o cd,
@@ -408,7 +408,7 @@ setup_update_agent_cron() {
   local marcador; marcador="$(cron_tag agent)"
   local cron_line="*/5 * * * * ${legado} >/dev/null 2>&1 ${marcador}"
   ( crontab -l 2>/dev/null | cron_merge "$marcador" "$legado" "$cron_line" ) | crontab -
-  c_grn "✓ atualização pela tela ativa (agente a cada 5 minutos)"
+  c_grn "✓ UI updates active (agent every 5 minutes)"
 }
 
 # Garante a chave de cifra dos segredos (webhooks/Nuvemshop) e a semeia no
@@ -424,7 +424,7 @@ ensure_encryption_key() {
   if [ -z "$key" ]; then
     key="$(openssl rand -hex 32)"
     printf '\nNUVEMSHOP_OAUTH_ENCRYPTION_KEY=%s\n' "$key" >> "$envfile"
-    c_grn "✓ chave de cifra dos segredos gerada e gravada no .env"
+    c_grn "✓ secrets encryption key generated and saved in .env"
   fi
   export NUVEMSHOP_OAUTH_ENCRYPTION_KEY="$key"
 
@@ -432,6 +432,6 @@ ensure_encryption_key() {
   # permite configurar a chave via parâmetro de banco).
   psql_run -c "insert into private.app_secrets (name, value) values ('nuvemshop_oauth_key', '${key}') on conflict (name) do update set value = excluded.value, updated_at = now();" \
     >/dev/null 2>&1 \
-    && c_grn "✓ chave de cifra ativa no banco (segredos de webhook são guardados cifrados)" \
-    || c_ylw "⚠ não consegui semear a chave de cifra no banco — segredos de webhook não poderão ser salvos até rodar update.sh de novo."
+    && c_grn "✓ encryption key active in db (webhook secrets are stored encrypted)" \
+    || c_ylw "⚠ could not seed encryption key in db — webhook secrets cannot be saved until running update.sh again."
 }
