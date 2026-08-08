@@ -1,5 +1,5 @@
 # DeskcommCRM — stack de produção self-host (VPS HostGator).
-# Sobe: caddy (HTTPS) → app (Next standalone) + waha + redis+srh + scheduler.
+# Sobe: caddy (HTTPS) → app (Next standalone) + evolution-api + redis+srh + scheduler.
 # Só o Caddy publica portas (80/443). Todo o resto vive na rede interna.
 #
 #   docker compose -f docker-compose.prod.yml --env-file .env up -d
@@ -23,7 +23,7 @@ services:
     depends_on:
       srh:
         condition: service_started
-      waha:
+      evolution-api:
         condition: service_started
     healthcheck:
       # Probe TCP puro (node existe na imagem; curl/nc não). NÃO usar /api/v1/health:
@@ -46,8 +46,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # dentro da rede do compose, o WAHA é o serviço 'waha' na porta interna 3000
-      WAHA_API_BASE_URL: http://waha:3000
+      # dentro da rede do compose, a Evolution API é o serviço 'evolution-api' na porta interna 8080
+      EVOLUTION_API_URL: http://evolution-api:8080
     networks:
       - internal
     healthcheck:
@@ -56,26 +56,38 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
-  waha:
-    # Core grátis por padrão; troque para devlikeapro/waha-plus via WAHA_IMAGE se
-    # precisar de multi-número/retry/S3 (licença paga).
-    image: ${WAHA_IMAGE:-devlikeapro/waha}
+  evolution-api:
+    # WhatsApp engine open-source (substitui o WAHA). Evolution API v2.
+    # Não publica porta no host: fica só na rede interna e o app acessa em
+    # http://evolution-api:8080 (o worker recebe EVOLUTION_API_URL acima).
+    # Troque a tag/registro via EVOLUTION_IMAGE se preferir (ex.: evoapicloud/evolution-api).
+    image: ${EVOLUTION_IMAGE:-atendai/evolution-api:v2.2.3}
     restart: unless-stopped
     environment:
-      # Prefixo sha512: faz o WAHA HASHEAR o X-Api-Key recebido e comparar com este
-      # hash. Sem o prefixo ele compara literal → o app (que manda o plaintext) toma 401.
-      WAHA_API_KEY: "sha512:${WAHA_API_KEY_SHA512}"
-      WHATSAPP_HOOK_URL: ${WAHA_WEBHOOK_BASE_URL}/api/v1/webhooks/waha
-      WHATSAPP_HOOK_EVENTS: "message,message.any,message.ack,session.status,state.change"
-      WHATSAPP_HOOK_HMAC: ${WAHA_HMAC_SECRET}
-      # WAHA lê WHATSAPP_DEFAULT_ENGINE (NÃO WAHA_DEFAULT_ENGINE — o nome errado
-      # fazia cair no default WEBJS, engine com browser que trava/corrompe a sessão
-      # quando o WhatsApp Web atualiza; NOWEB é websocket direto, estável e leve).
-      WHATSAPP_DEFAULT_ENGINE: ${WHATSAPP_DEFAULT_ENGINE:-NOWEB}
-      WAHA_DASHBOARD_ENABLED: "false"    # nunca expor o dashboard num template público
+      # URL pública que a API usa pra montar links internos (webhooks). Em prod o
+      # caminho é a rede interna do compose; sem porta exposta.
+      SERVER_URL: ${EVOLUTION_API_URL:-http://evolution-api:8080}
+      # Chave global de autenticação (header `apikey`). O app envia esta chave.
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      # Webhook global → app. O caminho mantém a rota de ingestão já existente do
+      # app; ao plugar o app na Evolution, ajustar p/ a rota nova (fora deste escopo).
+      WEBHOOK_GLOBAL_ENABLED: "true"
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
+      WEBHOOK_GLOBAL_URL: ${EVOLUTION_WEBHOOK_BASE_URL:-http://app:3000}/api/v1/webhooks/waha
+      # Cache: reutiliza o redis da stack (a Evolution usa o banco index 6).
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_REDIS_SAVE_INSTANCES: "false"
+      # Sem Postgres dedicado: o histórico das mensagens é responsabilidade do
+      # app/Supabase. As sessões (QR) persistem no volume evolution-instances.
+      DATABASE_ENABLED: "false"
+      CORS_ORIGIN: "*"
+    depends_on:
+      redis:
+        condition: service_started
     volumes:
-      - waha-data:/app/.sessions          # sessões pareadas (QR) — perder = re-parear
-      - waha-media:/app/.media
+      - evolution-instances:/evolution/instances   # sessões pareadas (QR) — perder = re-parear
     logging: *default-logging
     networks: [internal]
 
@@ -162,8 +174,7 @@ services:
     networks: [internal]
 
 volumes:
-  waha-data:
-  waha-media:
+  evolution-instances:
   caddy-data:
   caddy-config:
 

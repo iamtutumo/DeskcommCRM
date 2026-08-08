@@ -1081,6 +1081,10 @@ gen_b64() { openssl rand -base64 32; }
 : "${WAHA_API_KEY:=$(gen_hex)}"
 # O container WAHA espera o HASH SHA512 hex; o app envia o plaintext no X-Api-Key.
 WAHA_API_KEY_SHA512="$(printf '%s' "$WAHA_API_KEY" | openssl dgst -sha512 -hex | awk '{print $NF}')"
+# Evolution API (WhatsApp engine — substitui o WAHA no compose).
+: "${EVOLUTION_API_KEY:=$(gen_hex)}"
+: "${EVOLUTION_API_URL:=http://evolution-api:8080}"
+: "${EVOLUTION_INSTANCE_NAME:=deskcomm-instance}"
 UPSTASH_REDIS_REST_TOKEN="$SRH_TOKEN"
 c_grn "✓ segredos prontos"
 
@@ -1285,6 +1289,10 @@ fi
   envq WAHA_WEBHOOK_REQUIRE_SIGNATURE "${WAHA_WEBHOOK_REQUIRE_SIGNATURE:-false}"
   envq WAHA_IMAGE "${WAHA_IMAGE:-devlikeapro/waha}"
   envq WAHA_DEFAULT_ENGINE "${WAHA_DEFAULT_ENGINE:-NOWEB}"
+  # Evolution API (WhatsApp engine do compose — substitui o WAHA).
+  envq EVOLUTION_API_URL "$EVOLUTION_API_URL"
+  envq EVOLUTION_API_KEY "$EVOLUTION_API_KEY"
+  envq EVOLUTION_INSTANCE_NAME "$EVOLUTION_INSTANCE_NAME"
   envq UPSTASH_REDIS_REST_URL "http://srh:80"
   envq UPSTASH_REDIS_REST_TOKEN "$UPSTASH_REDIS_REST_TOKEN"
   envq SRH_TOKEN "$SRH_TOKEN"
