@@ -8,6 +8,18 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+### Corrigido
+
+- **Instalação self-hosted quebrava na hora de aplicar o schema** (`install.sh`): o
+  `supabase/baseline.sql`, gerado de um Postgres 16+ (Supabase cloud mais nova), trazia o
+  privilégio `MAINTAIN` nos GRANTs de 4 tabelas. Esse privilégio não existe no Postgres 15
+  da imagem self-hosted (`supabase/postgres:15.x`) e abortava a aplicação do schema com
+  `unrecognized privilege type "maintain"`, deixando a instalação parada no passo 7. O
+  baseline foi corrigido na fonte e os três scripts que o aplicam (`install.sh`,
+  `install-en.sh`, `update.sh`) agora filtram esse privilégio antes de enviar ao banco, como
+  proteção contra baselines regenerados no futuro. Remover o `MAINTAIN` não muda nada na
+  prática: os roles do app nunca rodam `VACUUM`/`ANALYZE`.
+
 ## [1.2.0] — 2026-08-06
 
 Versão grande: 122 correções e 62 novidades desde a 1.1.0. O tema é o agente de IA deixar de

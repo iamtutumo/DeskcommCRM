@@ -1446,6 +1446,19 @@ if [ -f supabase/baseline.sql ]; then
     >/dev/null 2>&1 \
     && c_grn "✓ extensions (vector, citext, pg_trgm) enabled in public" \
     || c_ylw "⚠ could not enable extensions — schema might fail below."
+  # Compat PG15 — proteção contra dumps regenerados: o pg_dump do Postgres 16+
+  # (Supabase cloud mais nova) emite o privilégio MAINTAIN nos GRANTs de tabela.
+  # Ele NÃO existe no PG15 da imagem self-hosted (supabase/postgres:15.x) e
+  # derrubava a aplicação com ON_ERROR_STOP: 'unrecognized privilege type
+  # "maintain"'. Filtramos o baseline para um arquivo temporário removendo só
+  # esse privilégio — os roles do app nunca rodam VACUUM/ANALYZE, então o GRANT
+  # restante é funcionalmente idêntico. O baseline.sql do repositório já vem
+  # corrigido na fonte; isto é a rede de segurança para baselines futuros.
+  BASELINE_COMPAT="$(mktemp /tmp/deskcomm-baseline.XXXXXX.sql)"
+  sed -e 's/GRANT MAINTAIN ON TABLE/GRANT SELECT ON TABLE/g' \
+      -e 's/MAINTAIN,//g' \
+      -e 's/,MAINTAIN//g' \
+      "$PROJECT_DIR/supabase/baseline.sql" > "$BASELINE_COMPAT"
   SCHEMA_LOG="$PROJECT_DIR/baseline-apply.log"
   # Banco novo ou re-execução? Re-aplicar com ON_ERROR_STOP pararia no primeiro
   # "já existe" (ex.: multiple primary keys) e PULARIA o resto do arquivo —
@@ -1461,7 +1474,7 @@ if [ -f supabase/baseline.sql ]; then
 
   if [ "$has_schema" = "1" ]; then
     c_ylw "• schema already exists — reapplying in update mode (erros 'já existe' são esperados e ficam no log)"
-    raw="$(docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -q -f /dev/stdin < "$PROJECT_DIR/supabase/baseline.sql" 2>&1 || true)"
+    raw="$(docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -q -f /dev/stdin < "$BASELINE_COMPAT" 2>&1 || true)"
     printf '%s\n' "$raw" > "$SCHEMA_LOG"
     benign='already exists|multiple primary keys|multiple default values|is already a member|already a partition'
     unexpected="$(printf '%s\n' "$raw" | grep -iE 'ERROR|FATAL' | grep -viE "$benign" || true)"
@@ -1472,14 +1485,16 @@ if [ -f supabase/baseline.sql ]; then
       c_grn "✓ schema re-applied (migrations appendix included)"
     fi
   else
-    if docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f /dev/stdin < "$PROJECT_DIR/supabase/baseline.sql" \
+    if docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f /dev/stdin < "$BASELINE_COMPAT" \
         > "$SCHEMA_LOG" 2>&1; then
       c_grn "✓ schema applied (log: $SCHEMA_LOG)"
     else
       tail -5 "$SCHEMA_LOG"
+      rm -f "$BASELINE_COMPAT"
       die "baseline failed on a NEW database — o schema ficaria incompleto (sem RLS). Log completo: $SCHEMA_LOG"
     fi
   fi
+  rm -f "$BASELINE_COMPAT"
 
   # Verificação real, não wishful thinking: o app precisa das tabelas core.
   n_tables="$(docker exec -i "$(docker ps -q -f name=supabase-db | head -n 1)" psql -U postgres -d postgres -tAc \

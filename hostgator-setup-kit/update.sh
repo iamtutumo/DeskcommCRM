@@ -130,8 +130,14 @@ if [ -f supabase/baseline.sql ]; then
     "create extension if not exists vector with schema public; create extension if not exists citext with schema public; create extension if not exists pg_trgm with schema public;" \
     >/dev/null 2>&1 || true
 
-  raw="$(docker run --rm -i -v "$PROJECT_DIR/supabase/baseline.sql:/b.sql:ro" \
-        postgres:17-alpine psql "$SUPABASE_DB_URL" -f /b.sql 2>&1 || true)"
+  # Filtro de compat PG15: o pg_dump do Postgres 16+ emite o privilégio MAINTAIN
+  # nos GRANTs de tabela — ele não existe no PG15 da imagem self-hosted
+  # ('unrecognized privilege type "maintain"'). Removemos só esse privilégio
+  # antes de enviar; mesma proteção do install.sh.
+  raw="$(sed -e 's/GRANT MAINTAIN ON TABLE/GRANT SELECT ON TABLE/g' \
+        -e 's/MAINTAIN,//g' \
+        -e 's/,MAINTAIN//g' "$PROJECT_DIR/supabase/baseline.sql" \
+        | docker run --rm -i postgres:17-alpine psql "$SUPABASE_DB_URL" -f - 2>&1 || true)"
 
   # Erros benignos ao re-aplicar sobre uma base existente:
   benign='already exists|multiple primary keys|multiple default values|is already a member|already a partition'
