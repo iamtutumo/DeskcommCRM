@@ -683,6 +683,25 @@ fi
 PROJECT_DIR="$(pwd)"
 source "$KIT_DIR/_common.sh"
 
+# _common.sh sobrescreve dc() e dc_files() sem o docker-compose.selfhost-supabase.yml
+# (ele é compartilhado com update.sh, que não sempre precisa dele). O install.sh
+# precisa dele para subir o Supabase self-hosted e, no modo build local, do
+# docker-compose.build.yml para compilar a imagem a partir do código.
+dc() {
+  local files=(-f "$COMPOSE")
+  [ "${REVERSE_PROXY:-caddy}" = "traefik" ] && files+=(-f "$COMPOSE_TRAEFIK")
+  files+=(-f docker-compose.selfhost-supabase.yml)
+  [ "${APP_BUILD_LOCAL:-}" = "true" ] && files+=(-f docker-compose.build.yml)
+  docker compose "${files[@]}" "$@"
+}
+dc_files() {
+  local out=""
+  [ "${REVERSE_PROXY:-caddy}" = "traefik" ] && out="-f $COMPOSE -f $COMPOSE_TRAEFIK" || out="-f $COMPOSE"
+  out="$out -f docker-compose.selfhost-supabase.yml"
+  [ "${APP_BUILD_LOCAL:-}" = "true" ] && out="$out -f docker-compose.build.yml"
+  printf '%s' "$out"
+}
+
 # ── 3. Coleta de config ─────────────────────────────────────────────────────
 fase 2 "Suas informações"
 
@@ -982,10 +1001,46 @@ else
   CAMPO_OPENAI_EXTRA="OPENAI_API_KEY|OpenAI Key — only for audio and knowledge base (Enter to skip)||v_openai|secret|opcional"
 fi
 
+# ── Modo da imagem: puxar do registry ou buildar localmente ─────────────────
+#
+# A imagem pré-buildada sobe em ~2 min e é o padrão para quem não alterou
+# código. Buildar localmente pega as alterações do checkout atual (inclusive
+# as suas), mas leva 15–25 min e exige VPS >=4 GB RAM (ou swap).
+escolher_modo_imagem() {
+  local atual="${APP_BUILD_LOCAL:-}"
+  # Se já veio do .env ou partial, respeita.
+  if [ -n "$atual" ]; then
+    [ "$atual" = "true" ] && { APP_IMAGE="${APP_IMAGE:-deskcomm-app:local}"; APP_PULL_POLICY="never"; }
+    return 0
+  fi
+  # Modo não-interativo: padrão é puxar do registry (mais rápido, mais seguro).
+  if [ "$NONINTERACTIVE" = 1 ]; then
+    APP_BUILD_LOCAL="false"
+    APP_IMAGE="${APP_IMAGE:-ghcr.io/melgarafael/deskcommcrm:latest}"
+    APP_PULL_POLICY="always"
+    return 0
+  fi
+  printf '\n\033[1mComo obter a imagem do app?\033[0m\n\n'
+  printf '  [1] Puxar do registry (padrão) — rápido, imagem já testada.\n'
+  printf '  [2] Buildar localmente a partir deste código — inclui suas alterações.\n'
+  printf '\n'
+  printf '  O build local leva 15–25 min e precisa de >=4 GB RAM (ou swap).\n'
+  printf '  Só escolha esta opção se você alterou o código do CRM.\n\n'
+  while :; do
+    if ! read -r -p "Escolha (Enter = 1): " escolha; then escolha=""; fi
+    [ -z "$escolha" ] && escolha=1
+    case "$escolha" in
+      1) APP_BUILD_LOCAL="false"; APP_IMAGE="${APP_IMAGE:-ghcr.io/melgarafael/deskcommcrm:latest}"; APP_PULL_POLICY="always"; break;;
+      2) APP_BUILD_LOCAL="true";  APP_IMAGE="deskcomm-app:local"; APP_PULL_POLICY="never"; break;;
+      *) c_ylw "Digite 1 ou 2.";;
+    esac
+  done
+}
+escolher_modo_imagem
+
 FIELDS=(
   "DOMAIN|CRM Domain (ex: crm.yourcompany.com)||v_domain||"
   "ACME_EMAIL|Your email (for SSL alerts)||v_email||"
-  "APP_IMAGE|App Docker image|ghcr.io/melgarafael/deskcommcrm:latest|||"
 
   "$CAMPO_IA"
   ${CAMPO_OPENAI_EXTRA:+"$CAMPO_OPENAI_EXTRA"}
@@ -1231,7 +1286,8 @@ fi
 {
   printf '# Gerado por install.sh — NÃO comitar. Contém segredos.\n'
   envq APP_IMAGE "$APP_IMAGE"
-  envq APP_PULL_POLICY "always"
+  envq APP_PULL_POLICY "${APP_PULL_POLICY:-always}"
+  envq APP_BUILD_LOCAL "${APP_BUILD_LOCAL:-false}"
   envq DOMAIN "$DOMAIN"
   envq ACME_EMAIL "$ACME_EMAIL"
   printf '# Proxy reverso: "caddy" (o kit sobe o dele nas portas 80/443) ou "traefik"\n'
@@ -1262,7 +1318,7 @@ fi
   printf '# imagem pública para trocar o texto por logo na sidebar. Ver lib/branding.ts.\n'
   envq APP_NAME "$APP_NAME"
   envq APP_LOGO_URL "${APP_LOGO_URL:-}"
-  envq ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+  envq ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY:-}"
   envq AI_GATEWAY_API_KEY "${AI_GATEWAY_API_KEY:-}"
   printf '# OpenRouter: alternativa ao AI Gateway para o chat da IA. A ordem de\n'
   printf '# resolução é AI_GATEWAY_API_KEY > OPENROUTER_API_KEY > provider direto,\n'
@@ -1479,7 +1535,12 @@ SQL
 # ── 9. Sobe a stack ─────────────────────────────────────────────────────────
 fase 4 "Colocando o CRM no ar"
 step "Puxando a imagem e subindo os serviços"
-dc pull
+if [ "${APP_BUILD_LOCAL:-}" = "true" ]; then
+  c_dim "  Build local ativado — compilando a imagem a partir do código (15–25 min)..."
+  dc build
+else
+  dc pull
+fi
 dc up -d
 c_grn "✓ containers up"
 
