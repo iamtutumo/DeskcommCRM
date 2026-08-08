@@ -1,0 +1,107 @@
+# Open-Source Self-Hosted Supabase Stack for DeskcommCRM
+# https://supabase.com/open-source
+#
+# Can be combined with the production stack:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.selfhost-supabase.yml up -d
+
+services:
+  supabase-db:
+    image: supabase/postgres:15.1.1.78
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-deskcomm_pg_secret_2026}
+      POSTGRES_DB: postgres
+      POSTGRES_HOST_AUTH_METHOD: md5
+    ports:
+      - "127.0.0.1:54322:5432"
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  supabase-auth:
+    image: supabase/gotrue:v2.158.1
+    restart: unless-stopped
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-deskcomm_pg_secret_2026}@supabase-db:5432/postgres
+      GOTRUE_SITE_URL: https://${DOMAIN:-localhost:3000}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    networks:
+      - internal
+
+  supabase-rest:
+    image: postgrest/postgrest:v12.2.0
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgresql://postgres:${POSTGRES_PASSWORD:-deskcomm_pg_secret_2026}@supabase-db:5432/postgres
+      PGRST_DB_SCHEMA: public,storage,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    networks:
+      - internal
+
+  supabase-storage:
+    image: supabase/storage-api:v1.11.13
+    restart: unless-stopped
+    environment:
+      ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://supabase-rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-deskcomm_pg_secret_2026}@supabase-db:5432/postgres
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: default
+      REGION: sa-east-1
+      GLOBAL_S3_BUCKET: mifos-documents
+    volumes:
+      - supabase-storage-data:/var/lib/storage
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      supabase-rest:
+        condition: service_started
+    networks:
+      - internal
+
+  supabase-kong:
+    image: kong:2.8.1
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./hostgator-setup-kit/kong.yml:/var/lib/kong/kong.yml:ro
+    depends_on:
+      supabase-auth:
+        condition: service_started
+      supabase-rest:
+        condition: service_started
+      supabase-storage:
+        condition: service_started
+    networks:
+      - internal
+
+volumes:
+  supabase-db-data:
+  supabase-storage-data:

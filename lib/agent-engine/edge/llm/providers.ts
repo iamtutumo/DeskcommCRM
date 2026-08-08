@@ -42,6 +42,7 @@ const GOOGLE_ENDPOINT = 'https://generativelanguage.googleapis.com';
  * `familia/modelo`, o mesmo dos nossos, sem tradução no meio.
  */
 export const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1';
+export const OLLAMA_ENDPOINT = 'http://localhost:11434/v1';
 
 /**
  * Providers reais do lançamento. Sonnet (Anthropic) é o default RECOMENDADO —
@@ -80,6 +81,14 @@ export function createDefaultRegistry(opts?: { allowedHosts?: string[] }): Provi
     openrouter: (apiKey, modelId, baseUrl) => {
       const endpoint = baseUrl ?? OPENROUTER_ENDPOINT;
       return createOpenAI({ apiKey, baseURL: endpoint, fetch: contain(endpoint) })(modelId);
+    },
+    ollama: (apiKey, modelId, baseUrl) => {
+      const endpoint = baseUrl ?? OLLAMA_ENDPOINT;
+      return createOpenAI({
+        apiKey: apiKey || 'ollama',
+        baseURL: endpoint,
+        fetch: contain(endpoint),
+      })(modelId);
     },
   };
 }

@@ -42,6 +42,15 @@ export interface ProvedorSuportado {
 
 export const PROVEDORES: readonly ProvedorSuportado[] = [
   {
+    id: "ollama",
+    rotulo: "Ollama (Local / Self-Hosted)",
+    quandoUsar:
+      "O padrão recomendado para rodar modelos locais open-source na sua própria VPS ou servidor sem custos por token e com total privacidade dos dados.",
+    aceitaEndpointProprio: true,
+    catalogoSincronizavel: false,
+    ondePegarAChave: "https://ollama.com",
+  },
+  {
     id: "anthropic",
     rotulo: "Anthropic (Claude)",
     quandoUsar:

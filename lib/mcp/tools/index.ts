@@ -71,6 +71,26 @@ import {
   crmCloseDemand,
   crmProposeReactivation,
 } from "./retencao";
+import {
+  mifosGetClient,
+  mifosGetLoanAccounts,
+  mifosGetRepaymentSchedule,
+  mifosGetLoanCharges,
+  mifosSimulateLoanSchedule,
+  mifosCreateLoanApplication,
+  mifosListOffices,
+  mifosListStaff,
+  mifosListProducts,
+  mifosGetSavingsAccounts,
+  mifosGetShareAccounts,
+  mifosTriggerSync,
+} from "./mifos";
+import {
+  externalSendSmsEgosms,
+  externalVerifyKycIdswyft,
+  externalCreateSignatureDocumenso,
+  externalGetStorageUrlMinio,
+} from "./external-integrations";
 
 // Cast via `unknown` porque McpToolDefinition<TInput> nao e covariante
 // em TInput (handler usa TInput em posicao contravariante). Coletar
@@ -97,6 +117,18 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmListContactOrders,
   crmSearchProducts,
   crmListPrivacyRequests,
+  mifosGetClient,
+  mifosGetLoanAccounts,
+  mifosGetRepaymentSchedule,
+  mifosGetLoanCharges,
+  mifosSimulateLoanSchedule,
+  mifosListOffices,
+  mifosListStaff,
+  mifosListProducts,
+  mifosGetSavingsAccounts,
+  mifosGetShareAccounts,
+  externalVerifyKycIdswyft,
+  externalGetStorageUrlMinio,
   // read — organizar a operação (W4)
   crmListStages,
   crmListTags,
@@ -133,6 +165,10 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmAddCaseNote,
   crmCloseHumanCase,
   crmResumeAiAttendance,
+  mifosCreateLoanApplication,
+  mifosTriggerSync,
+  externalSendSmsEgosms,
+  externalCreateSignatureDocumenso,
   // handoff (special)
   crmRequestHumanHandoff,
 ] as unknown as ReadonlyArray<McpToolDefinition>;
