@@ -98,14 +98,14 @@ moldura() {
   printf '\033[36m╰%s╯\033[0m\n' "$(printf '─%.0s' $(seq 1 $((larg + 2))))" >&2
 }
 
-moldura "DeskcommCRM · criando seu banco no Supabase"
+moldura "DeskcommCRM · creating your Supabase database"
 
 if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
-  c_red "✖ Falta o token de acesso do Supabase."
+  c_red "✖ Missing Supabase access token."
   printf '\n' >&2
-  c_dim "  1. Abra https://supabase.com/dashboard/account/tokens"
-  c_dim "  2. Generate new token, dê um nome (ex.: deskcommcrm) e copie"
-  c_dim "  3. Rode:  export SUPABASE_ACCESS_TOKEN=sbp_...  e tente de novo"
+  c_dim "  1. Open https://supabase.com/dashboard/account/tokens"
+  c_dim "  2. Select Generate new token, name it (e.g. deskcommcrm), and copy it"
+  c_dim "  3. Run:  export SUPABASE_ACCESS_TOKEN=sbp_...  and try again"
   printf '\n' >&2
   exit 1
 fi
@@ -134,34 +134,34 @@ api() {
 }
 
 # ── 1. Organização ──────────────────────────────────────────────────────────
-step "Descobrindo a organização"
+step "Finding the organization"
 ORG_ID="${SUPABASE_ORG_ID:-}"
 if [ -z "$ORG_ID" ]; then
   orgs="$(api GET /organizations)"
   ORG_ID="$(json_str "$orgs" id)"
-  [ -n "$ORG_ID" ] || die "Não achei nenhuma organização. Confira o token."
-  c_grn "✓ organização: $(json_str "$orgs" name) ($ORG_ID)"
+  [ -n "$ORG_ID" ] || die "No organization was found. Check the token."
+  c_grn "✓ organization: $(json_str "$orgs" name) ($ORG_ID)"
 fi
 
 # ── 2. Senha do banco ───────────────────────────────────────────────────────
 # Sem caracteres que quebram uma URL (@ : / ? # &) — a senha entra na
 # connection string, e um '@' aqui parte o host no meio.
 DB_PASS="$(gen_db_pass)"
-[ "${#DB_PASS}" -eq 32 ] || die "não consegui gerar a senha do banco (só ${#DB_PASS} caracteres). Rode de novo."
+[ "${#DB_PASS}" -eq 32 ] || die "could not generate the database password (only ${#DB_PASS} characters). Run it again."
 
 # ── 3. Cria o projeto ───────────────────────────────────────────────────────
-step "Criando o projeto '$PROJECT_NAME' em $REGION"
+step "Creating project '$PROJECT_NAME' in $REGION"
 created="$(api POST /projects "{\"name\":\"$PROJECT_NAME\",\"organization_id\":\"$ORG_ID\",\"region\":\"$REGION\",\"db_pass\":\"$DB_PASS\"}")"
 REF="$(json_str "$created" ref)"
-[ -n "$REF" ] || { c_red "Resposta da API:"; printf '%s\n' "$created" >&2; die "Não consegui criar o projeto."; }
-c_grn "✓ projeto criado: $REF"
+[ -n "$REF" ] || { c_red "API response:"; printf '%s\n' "$created" >&2; die "Could not create the project."; }
+c_grn "✓ project created: $REF"
 
 # ── 4. Espera ficar de pé ───────────────────────────────────────────────────
 # Projeto novo NÃO nasce pronto: passa por COMING_UP até ACTIVE_HEALTHY. Sem
 # esperar, o passo do schema falha com "connection refused" e a instalação
 # morre no meio sem explicar por quê.
-step "Aguardando o banco subir"
-c_dim "      Projeto novo leva de 2 a 5 minutos para ficar de pé. Pode deixar rodando."
+step "Waiting for the database to start"
+c_dim "      A new project takes 2–5 minutes to start. Keep this running."
 ok=""
 inicio=$SECONDS
 LIMITE=60   # 60 x 10s = 10 minutos
@@ -171,7 +171,7 @@ for i in $(seq 1 $LIMITE); do
     ACTIVE_HEALTHY) ok=1; break;;
     INACTIVE|REMOVED|RESTORE_FAILED)
       printf '\n' >&2
-      die "Projeto entrou em '$st' — verifique em supabase.com/dashboard/project/$REF";;
+      die "Project entered '$st' status — check supabase.com/dashboard/project/$REF";;
   esac
   # Uma linha que se reescreve: barra + estado REAL vindo da API + tempo
   # decorrido. Ponto solto por 10 minutos parece travamento; ver COMING_UP
@@ -183,23 +183,23 @@ for i in $(seq 1 $LIMITE); do
   barra=""; [ "$preenchido" -gt 0 ] && barra="$(printf '█%.0s' $(seq 1 "$preenchido"))"
   vazio="";  [ $((24 - preenchido)) -gt 0 ] && vazio="$(printf '░%.0s' $(seq 1 $((24 - preenchido))))"
   printf '\r      \033[36m%s%s\033[0m  %-16s %dm%02ds' \
-    "$barra" "$vazio" "${st:-consultando…}" $(( (SECONDS-inicio)/60 )) $(( (SECONDS-inicio)%60 )) >&2
+    "$barra" "$vazio" "${st:-checking…}" $(( (SECONDS-inicio)/60 )) $(( (SECONDS-inicio)%60 )) >&2
   sleep 10
 done
 printf '\r%*s\r' 70 '' >&2
-[ "$ok" = 1 ] || die "Não ficou pronto em 10 minutos. Veja em supabase.com/dashboard/project/$REF"
-c_grn "✓ banco no ar (levou $(( (SECONDS-inicio)/60 ))m$(( (SECONDS-inicio)%60 ))s)"
+[ "$ok" = 1 ] || die "The project was not ready after 10 minutes. Check supabase.com/dashboard/project/$REF"
+c_grn "✓ database is ready (took $(( (SECONDS-inicio)/60 ))m$(( (SECONDS-inicio)%60 ))s)"
 
 # ── 5. Chaves ───────────────────────────────────────────────────────────────
-step "Buscando as chaves de API"
+step "Fetching API keys"
 keys="$(api GET "/projects/$REF/api-keys")"
 # `|| true` pelo mesmo motivo do json_str(): sem ele, resposta inesperada da API
 # mata o script na atribuição e a linha de baixo — que imprime a resposta crua e
 # explica o que houve — nunca roda.
 ANON="$(grep -o '"name"[[:space:]]*:[[:space:]]*"anon"[^}]*' <<<"$keys" | grep -o '"api_key"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
 SERVICE="$(grep -o '"name"[[:space:]]*:[[:space:]]*"service_role"[^}]*' <<<"$keys" | grep -o '"api_key"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
-[ -n "$ANON" ] && [ -n "$SERVICE" ] || { printf '%s\n' "$keys" >&2; die "Não consegui ler anon/service_role."; }
-c_grn "✓ anon e service_role obtidas"
+[ -n "$ANON" ] && [ -n "$SERVICE" ] || { printf '%s\n' "$keys" >&2; die "Could not read anon/service_role keys."; }
+c_grn "✓ anon and service_role keys retrieved"
 
 # ── 6. Descobre o host do POOLER — testando, não adivinhando ────────────────
 # O host é `aws-<N>-<regiao>.pooler.supabase.com`, e esse <N> VARIA por projeto
@@ -210,7 +210,7 @@ c_grn "✓ anon e service_role obtidas"
 # Então: monta os candidatos e PROVA cada um com uma conexão real, via o mesmo
 # postgres:17-alpine que o install.sh já usa para aplicar o schema. Fica o que
 # responde — sem chute.
-step "Descobrindo o host do pooler (testando conexão real)"
+step "Finding the pooler host (testing a real connection)"
 DB_URL=""
 for n in 0 1 2; do
   cand="postgresql://postgres.${REF}:${DB_PASS}@aws-${n}-${REGION}.pooler.supabase.com:5432/postgres"
@@ -218,24 +218,24 @@ for n in 0 1 2; do
     DB_URL="$cand"; c_grn "✓ pooler: aws-${n}-${REGION}"; break
   fi
 done
-[ -n "$DB_URL" ] || die "Nenhum host de pooler respondeu. Pegue a Session pooler em Settings > Database."
+[ -n "$DB_URL" ] || die "No pooler host responded. Copy the Session pooler URI from Settings > Database."
 
 # ── 7. Saída ────────────────────────────────────────────────────────────────
 printf '\n' >&2
-moldura "Projeto Supabase pronto"
+moldura "Supabase project is ready"
 # O resumo vai MASCARADO: quem instala costuma mandar print pedindo ajuda, e um
 # service_role inteiro num screenshot é acesso total ao banco, sem RLS.
-printf '  %-14s %s\n' "Projeto"  "$PROJECT_NAME ($REF)" >&2
-printf '  %-14s %s\n' "Região"   "$REGION" >&2
+printf '  %-14s %s\n' "Project"  "$PROJECT_NAME ($REF)" >&2
+printf '  %-14s %s\n' "Region"   "$REGION" >&2
 printf '  %-14s %s\n' "URL"      "https://$REF.supabase.co" >&2
 printf '  %-14s %s\n' "anon"     "$(mascara "$ANON")" >&2
 printf '  %-14s %s\n' "service"  "$(mascara "$SERVICE")" >&2
-printf '  %-14s %s\n' "banco"    "$(mascara "$DB_PASS") @ $(sed 's|.*@||; s|:5432.*||' <<<"$DB_URL")" >&2
+printf '  %-14s %s\n' "database" "$(mascara "$DB_PASS") @ $(sed 's|.*@||; s|:5432.*||' <<<"$DB_URL")" >&2
 printf '\n' >&2
-c_ylw "  ⚠ A senha do banco NÃO é recuperável pela API depois. Guarde agora."
-c_dim "     Painel: https://supabase.com/dashboard/project/$REF"
+c_ylw "  ⚠ The database password CANNOT be retrieved through the API later. Save it now."
+c_dim "     Dashboard: https://supabase.com/dashboard/project/$REF"
 printf '\n' >&2
-c_grn "  Cole as 4 linhas abaixo no seu .env (ou redirecione: >> .env)"
+c_grn "  Paste the four lines below into .env (or redirect output with: >> .env)"
 printf '\n' >&2
 
 # stdout limpo: só as 4 linhas, para `bash supabase-provision.sh ... >> .env`

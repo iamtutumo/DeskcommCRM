@@ -108,28 +108,28 @@ garantir_rede_do_proxy() {
     # stacks é um caso conhecido). Sem repassar a resposta dele, a mensagem
     # mandaria repetir à mão o comando que acabou de falhar.
     if ! erro="$(docker network create "$TRAEFIK_NETWORK" 2>&1 >/dev/null)"; then
-      die "Não consegui criar a rede Docker '$TRAEFIK_NETWORK'. O Docker respondeu:
+      die "Could not create Docker network '$TRAEFIK_NETWORK'. Docker responded:
   ${erro}"
     fi
-    c_dim "  (rede '$TRAEFIK_NETWORK' criada — é por ela que o Traefik alcança o CRM)"
+    c_dim "  (network '$TRAEFIK_NETWORK' created — Traefik uses it to reach the CRM)"
     ;;
   inexistente)
-    die "A rede Docker '$TRAEFIK_NETWORK' não existe.
-Rode 'docker network ls', identifique a rede do seu Traefik e ponha
-TRAEFIK_NETWORK=<nome> no .env antes de tentar de novo."
+    die "Docker network '$TRAEFIK_NETWORK' does not exist.
+Run 'docker network ls', identify your Traefik network, and set
+TRAEFIK_NETWORK=<name> in .env before trying again."
     ;;
   driver_errado)
     # Mandar quem está em modo host "procurar a rede do seu Traefik" é mandar
     # procurar o que não existe: em modo host ele não está em rede nenhuma do
     # Docker. Para esse caso a saída é apagar a linha e deixar o kit decidir —
     # ele cria a bridge do projeto sozinho.
-    die "A rede '$TRAEFIK_NETWORK' tem driver '$drv', e o app precisa
-de uma bridge para o Traefik alcançar o contêiner. Se o seu Traefik roda em modo
-host (é o caso quando 'docker ps' não mostra porta publicada nele), APAGUE a linha
-TRAEFIK_NETWORK do .env: o kit cria e usa a rede '$nossa'.
-Senão, rode 'docker network ls' e ponha a bridge certa em TRAEFIK_NETWORK no .env.
-Se for uma overlay do Swarm, ela precisa ter sido criada com --attachable —
-sem isso um contêiner de compose comum não consegue entrar nela."
+    die "Network '$TRAEFIK_NETWORK' uses the '$drv' driver, but the app needs
+a bridge network so Traefik can reach the container. If Traefik runs in host mode
+(that is usually the case when 'docker ps' shows no published port for it), DELETE
+the TRAEFIK_NETWORK line from .env: the kit will create and use '$nossa'.
+Otherwise, run 'docker network ls' and set TRAEFIK_NETWORK to the correct bridge
+in .env. A Swarm overlay must have been created with --attachable; otherwise a
+regular Compose container cannot join it."
     ;;
   esac
 }
@@ -279,8 +279,8 @@ load_env() {
 enter_project() {
   if [ -f "$COMPOSE" ]; then :;
   elif [ -f "deskcommcrm/$COMPOSE" ]; then cd deskcommcrm;
-  else die "Não achei $COMPOSE. Rode a partir da pasta do projeto."; fi
-  [ -f .env ] || die "Falta o .env (rode install.sh primeiro)."
+  else die "Could not find $COMPOSE. Run this command from the project directory."; fi
+  [ -f .env ] || die "Missing .env (run install.sh first)."
   load_env .env
   PROJECT_DIR="$(pwd)"
 }
@@ -338,7 +338,7 @@ owner_id_by_email() {
 # primeira (o filtro remove tudo que casa com o marcador, e as duas linhas
 # casavam). Medido na VPS: depois de instalar, sobrava só o agente e o CRM ficava
 # SEM o drain de eventos — a automação inteira parada, em silêncio.
-cron_tag() { printf '# deskcomm:%s:%s' "${PROJECT_DIR:-$PWD}" "${1:?papel da linha (drain|agent)}"; }
+cron_tag() { printf '# deskcomm:%s:%s' "${PROJECT_DIR:-$PWD}" "${1:?cron entry role (drain|agent)}"; }
 
 # Puro (testável sem tocar no crontab real): lê o crontab atual em stdin e
 # imprime o novo. Tira as linhas DESTA instalação — pelo marcador, e também
@@ -368,7 +368,10 @@ setup_event_log_drain_cron() {
   if crontab -l 2>/dev/null | grep -qF -e "$url_drain"; then first_time=0; fi
 
   local cron_line="* * * * * curl -fsS -H \"Authorization: Bearer ${secret}\" \"${url_drain}\" >/dev/null 2>&1 ${marcador}"
-  ( crontab -l 2>/dev/null | cron_merge "$marcador" "$url_drain" "$cron_line" ) | crontab -
+  # A fresh server has no crontab yet, so `crontab -l` exits 1. Normalize that
+  # empty state before the pipe; with `set -e -o pipefail`, leaving it as 1 would
+  # abort the installer immediately after writing its first cron entry.
+  ( { crontab -l 2>/dev/null || true; } | cron_merge "$marcador" "$url_drain" "$cron_line" ) | crontab -
   c_grn "✓ automations active (event-log-drain cron, every minute)"
 
   if [ "$first_time" = 1 ]; then
@@ -378,7 +381,7 @@ setup_event_log_drain_cron() {
     # (ex.: webhook de dias/semanas atrás) — surpresa indesejada pro dono do
     # CRM. Marcamos como 'done' só os realmente velhos (>7 dias); os recentes
     # continuam 'pending' e processam normalmente no próximo drain.
-    step "Higienizando eventos pendentes antigos (1ª ativação do cron)"
+    step "Sanitizing old pending events (first cron activation)"
     psql_run -c "update event_log set status='done', updated_at=now() where status='pending' and created_at < now() - interval '7 days';" \
       >/dev/null 2>&1 \
       && c_grn "✓ pending events older than 7 days marked as completed" \
@@ -407,7 +410,9 @@ setup_update_agent_cron() {
   local legado="cd ${PROJECT_DIR} && bash hostgator-setup-kit/agent.sh"
   local marcador; marcador="$(cron_tag agent)"
   local cron_line="*/5 * * * * ${legado} >/dev/null 2>&1 ${marcador}"
-  ( crontab -l 2>/dev/null | cron_merge "$marcador" "$legado" "$cron_line" ) | crontab -
+  # `crontab -l` exits 1 when the user has no crontab; that means an empty input,
+  # not a failure. Normalize it so pipefail does not abort a fresh installation.
+  ( { crontab -l 2>/dev/null || true; } | cron_merge "$marcador" "$legado" "$cron_line" ) | crontab -
   c_grn "✓ UI updates active (agent every 5 minutes)"
 }
 

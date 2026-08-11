@@ -1,6 +1,6 @@
 # DeskcommCRM — Self-Host Installation Kit (VPS / Docker Compose)
 
-> English documentation for installing DeskcommCRM on a Linux VPS (HostGator or any Ubuntu/Debian server) with **Open-Source Self-Hosted Supabase** (`https://supabase.com/open-source`), **Evolution API** for WhatsApp, and **Standard SMTP** for email.
+> English documentation for installing DeskcommCRM on a Linux VPS (HostGator or any Ubuntu/Debian server) with **Open-Source Self-Hosted Supabase**, **Evolution API** for WhatsApp, and Docker Compose.
 
 ---
 
@@ -11,37 +11,47 @@ SSH into your Linux server and run:
 ```bash
 git clone https://github.com/melgarafael/DeskcommCRM.git
 cd DeskcommCRM
-bash hostgator-setup-kit/install-en.sh
+bash hostgator-setup-kit/install.sh
 ```
 
-### What `install-en.sh` Asks You
+The primary `install.sh` installer displays its prompts, progress messages, and errors in English. It is idempotent, so you can run the same command again after correcting a configuration or infrastructure problem.
 
-1. **CRM Domain:** e.g., `crm.yourcompany.com` (Caddy automatically configures SSL HTTPS certificates).
-2. **Supabase Setup Choice:**
-   * **Option 1: Open-Source Self-Hosted Supabase** (`https://supabase.com/open-source`) — Automatically provisions Supabase Docker containers (`supabase-db`, `supabase-auth`, `supabase-rest`, `supabase-storage`, `supabase-kong`) on your VPS without requiring an external cloud subscription.
-   * **Option 2: External / Cloud Supabase Project** — Enter an existing Supabase URL and keys manually.
-3. **WhatsApp Engine (Evolution API):** Enter your Evolution API URL, API key, and instance name (`EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE_NAME`).
-4. **Transactional Email (Standard SMTP):** Enter your SMTP mail server host, port, user, password, and sender address (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`).
-5. **First Admin Owner Account:** Your email and password for logging into DeskcommCRM.
+### What `install.sh` Asks You
+
+1. **CRM domain and SSL email:** for example, `crm.yourcompany.com`. The installer configures HTTPS through Caddy, or detects and uses a supported existing Traefik proxy.
+2. **AI provider:** OpenRouter, Anthropic, or OpenAI, plus the relevant API key. AI keys are optional and can be configured later.
+3. **First admin account:** the email and password used to sign in to DeskcommCRM.
+4. **Application name and image source:** use the prebuilt image (recommended), or build from the current source checkout.
+
+The installer generates the local Supabase credentials and other internal secrets automatically, starts the database, applies `supabase/baseline.sql`, starts the application stack, and creates the first administrator.
+
+For unattended installation, copy `.env.hostgator.example` to `.env`, fill in the required values, and run:
+
+```bash
+bash hostgator-setup-kit/install.sh --yes
+```
 
 ---
 
 ## 2. Docker Compose Architecture
 
-When you select Open-Source Self-Hosted Supabase, `install-en.sh` deploys two composed stacks:
-* `docker-compose.prod.yml`: DeskcommCRM App (`next.js`), Evolution API, Redis, and Caddy HTTPS proxy.
-* `docker-compose.selfhost-supabase.yml`: Open-Source Supabase stack (`supabase/postgres:15.1.1.78` with `pgvector`, `gotrue`, `postgrest`, `storage-api`, and `kong`).
+The installer deploys two Compose stacks:
+
+* `docker-compose.prod.yml`: DeskcommCRM, Evolution API, Redis, and the Caddy HTTPS proxy.
+* `docker-compose.selfhost-supabase.yml`: Open-Source Supabase (`supabase/postgres:15.1.1.78` with pgvector, GoTrue, PostgREST, Storage API, and Kong).
+
+On a server whose existing Traefik already owns ports 80 and 443, the installer also uses `docker-compose.traefik.yml` instead of starting Caddy.
 
 ### Useful Commands
 
 ```bash
-# Check status of all containers
+# Check the containers
 docker compose -f docker-compose.prod.yml -f docker-compose.selfhost-supabase.yml ps
 
-# View live logs
+# Follow application logs
 docker compose -f docker-compose.prod.yml -f docker-compose.selfhost-supabase.yml logs -f app
 
-# Restart stack
+# Restart the stack
 docker compose -f docker-compose.prod.yml -f docker-compose.selfhost-supabase.yml restart
 ```
 
@@ -49,5 +59,5 @@ docker compose -f docker-compose.prod.yml -f docker-compose.selfhost-supabase.ym
 
 ## 3. Microfinance & Authoritative Double-Entry Accounting
 
-* **UGX Default Currency:** DeskcommCRM's double-entry accounting engine defaults to **Uganda Shillings (`UGX`)**.
-* **Decoupled Ledger Architecture:** Mifos X is used purely for loan schedule and savings tracking, while all general ledger (GL) double-entry accounting (`accounting_accounts`, `accounting_journal_entries`, `accounting_journal_lines`, Trial Balance, Balance Sheet, Income Statement) occurs authoritatively inside DeskcommCRM.
+* **UGX default currency:** DeskcommCRM's double-entry accounting engine defaults to **Uganda Shillings (`UGX`)**.
+* **Decoupled ledger architecture:** Mifos X is used for loan schedules and savings tracking, while all general-ledger double-entry accounting (`accounting_accounts`, `accounting_journal_entries`, `accounting_journal_lines`, Trial Balance, Balance Sheet, and Income Statement) occurs authoritatively inside DeskcommCRM.

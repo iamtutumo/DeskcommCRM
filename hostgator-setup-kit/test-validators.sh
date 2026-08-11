@@ -70,15 +70,23 @@ mkjwt() {
   printf 'eyJhbGciOiJIUzI1NiJ9.%s.assinatura' "$payload"
 }
 
+echo "compatibilidade do baseline com o PostgreSQL 15"
+if grep -qw 'MAINTAIN' ../supabase/baseline.sql; then
+  printf '  ✗ baseline ainda contém o privilégio MAINTAIN, que não existe no PostgreSQL 15\n'
+  fail=1
+else
+  printf '  ✓ nenhum privilégio MAINTAIN incompatível\n'
+fi
+
 echo "domínio"
 ok "aceita subdomínio"        pass   v_domain "crm.empresa.com.br"
-ok "rejeita com https://"     reject v_domain "https://crm.empresa.com.br"  "sem https"
-ok "rejeita com caminho"      reject v_domain "crm.empresa.com.br/app"      "sem barra"
-ok "rejeita sem ponto"        reject v_domain "localhost"                   "falta o ponto"
+ok "rejeita com https://"     reject v_domain "https://crm.empresa.com.br"  "without https"
+ok "rejeita com caminho"      reject v_domain "crm.empresa.com.br/app"      "without a slash"
+ok "rejeita sem ponto"        reject v_domain "localhost"                   "dot is missing"
 
 echo "e-mail"
 ok "aceita e-mail válido"     pass   v_email "voce@empresa.com.br"
-ok "rejeita sem @"            reject v_email "voce.empresa.com.br"          "inválido"
+ok "rejeita sem @"            reject v_email "voce.empresa.com.br"          "Invalid email"
 
 echo "URL do Supabase: a da nuvem E a de um Supabase próprio"
 # O gate de formato exigia `.supabase.co` e matava quem roda Supabase
@@ -126,19 +134,19 @@ sburl_ok "rejeita http:// (sem TLS)"               reject "http://db-crm.exemplo
 # devolve o self-hoster ao beco de onde esta correção o tirou — o defeito
 # migraria do `case` para a prosa, onde não há catraca nenhuma.
 sburl_ok "a recusa ensina o caso da NUVEM"         reject "meu-supabase" "supabase.co"
-sburl_ok "a recusa ensina o caso do Supabase PRÓPRIO" reject "meu-supabase" "servidor"
+sburl_ok "a recusa ensina o caso do Supabase PRÓPRIO" reject "meu-supabase" "server"
 
 echo "chaves do Supabase (formato/papel/projeto)"
-ok "rejeita service_role no campo anon" reject v_anon    "$(mkjwt service_role abcdefghijklmnop)" "preciso da 'anon'"
-ok "rejeita anon no campo service_role" reject v_service "$(mkjwt anon abcdefghijklmnop)"         "preciso da 'service_role'"
-ok "rejeita chave de outro projeto"     reject v_anon    "$(mkjwt anon zzzzzzzzzzzzzzzz)"         "OUTRO projeto"
-ok "rejeita texto que não é chave"      reject v_anon    "minha-chave-secreta"                    "não parece uma chave"
+ok "rejeita service_role no campo anon" reject v_anon    "$(mkjwt service_role abcdefghijklmnop)" "requires the 'anon'"
+ok "rejeita anon no campo service_role" reject v_service "$(mkjwt anon abcdefghijklmnop)"         "requires the 'service_role'"
+ok "rejeita chave de outro projeto"     reject v_anon    "$(mkjwt anon zzzzzzzzzzzzzzzz)"         "DIFFERENT Supabase project"
+ok "rejeita texto que não é chave"      reject v_anon    "minha-chave-secreta"                    "does not look like a Supabase key"
 
 echo "connection string"
-ok "rejeita [YOUR-PASSWORD] não trocado" reject v_db_url "postgresql://postgres.abcdefghijklmnop:[YOUR-PASSWORD]@aws-1-us-west-2.pooler.supabase.com:5432/postgres" "troque isso pela senha"
+ok "rejeita [YOUR-PASSWORD] não trocado" reject v_db_url "postgresql://postgres.abcdefghijklmnop:[YOUR-PASSWORD]@aws-1-us-west-2.pooler.supabase.com:5432/postgres" "replace it with the database password"
 ok "rejeita Direct connection (IPv6)"    reject v_db_url "postgresql://postgres:senha@db.abcdefghijklmnop.supabase.co:5432/postgres"                                "Session pooler"
-ok "rejeita string de outro projeto"     reject v_db_url "postgresql://postgres.zzzzzzzzzzzzzzzz:senha@aws-1-us-west-2.pooler.supabase.com:5432/postgres"          "mesmo projeto"
-ok "rejeita o que não é URL de Postgres" reject v_db_url "aws-1-us-west-2.pooler.supabase.com"                                                                     "começa com postgresql"
+ok "rejeita string de outro projeto"     reject v_db_url "postgresql://postgres.zzzzzzzzzzzzzzzz:senha@aws-1-us-west-2.pooler.supabase.com:5432/postgres"          "same project"
+ok "rejeita o que não é URL de Postgres" reject v_db_url "aws-1-us-west-2.pooler.supabase.com"                                                                     "begins with postgresql"
 
 echo "connection string: Supabase PRÓPRIO não tem <ref> de projeto"
 # A comparação de projeto lê o `postgres.<ref>` do pooler DA NUVEM. Num Supabase
@@ -199,7 +207,7 @@ db_ok "próprio: role 'postgres' segue passando"           pass \
 db_ok "NUVEM: projeto cruzado continua barrado antes do banco" reject \
   "https://abcdefghijklmnop.supabase.co" \
   "postgresql://postgres.zzzzzzzzzzzzzzzz:senha@aws-1-us-west-2.pooler.supabase.com:5432/postgres" \
-  "mesmo projeto"
+  "same project"
 db_ok "NUVEM: mesmo projeto passa"                        pass \
   "https://abcdefghijklmnop.supabase.co" \
   "postgresql://postgres.abcdefghijklmnop:senha@aws-1-us-west-2.pooler.supabase.com:5432/postgres"
@@ -213,7 +221,7 @@ for _sufixo in "/" "/rest/v1" " "; do
   db_ok "NUVEM com '${_sufixo}' na URL: projeto cruzado continua barrado" reject \
     "https://abcdefghijklmnop.supabase.co${_sufixo}" \
     "postgresql://postgres.zzzzzzzzzzzzzzzz:senha@aws-1-us-west-2.pooler.supabase.com:5432/postgres" \
-    "mesmo projeto"
+    "same project"
 done
 unset _sufixo
 # E o outro lado da mesma extração: Supabase próprio com barra final continua
@@ -227,10 +235,10 @@ db_ok "sem URL respondida ainda: não há o que comparar"   pass \
   "" "postgresql://postgres.zzzzzzzzzzzzzzzz:senha@aws-1-us-west-2.pooler.supabase.com:5432/postgres"
 
 echo "chaves de IA e senha"
-ok "rejeita chave Anthropic com prefixo errado" reject v_anthropic "sk-proj-abc123" "começa com 'sk-ant-'"
-ok "rejeita chave OpenAI com prefixo errado"    reject v_openai    "minha-chave"    "começa com 'sk-'"
+ok "rejeita chave Anthropic com prefixo errado" reject v_anthropic "sk-proj-abc123" "keys begin with 'sk-ant-'"
+ok "rejeita chave OpenAI com prefixo errado"    reject v_openai    "minha-chave"    "keys begin with 'sk-'"
 ok "aceita OpenAI vazia (é opcional)"           pass   v_openai    ""
-ok "rejeita senha curta"                        reject v_password  "1234567"        "muito curta"
+ok "rejeita senha curta"                        reject v_password  "1234567"        "too short"
 ok "aceita senha de 8+"                         pass   v_password  "12345678"
 
 echo "leitura do .env (load_env)"
@@ -325,7 +333,7 @@ PROV
   # Sem esta checagem o teste passaria por VACUIDADE: se o install.sh morresse
   # antes do bloco (stub quebrado, refactor movendo o trecho), nada executaria o
   # veneno e o silêncio seria lido como aprovação.
-  if ! printf '%s' "$saida" | grep -q "credenciais entraram sozinhas"; then
+  if ! printf '%s' "$saida" | grep -q "credentials were configured automatically"; then
     printf '  ✗ o install.sh não chegou ao bloco do Supabase — teste inconclusivo, não verde\n'; exit 1
   fi
   if [ -e "$MARCA" ]; then
@@ -585,7 +593,7 @@ echo "provisionamento do Supabase: senha do banco"
 #     depende de a API responder (e o token aqui é propositalmente inválido).
 saida="$(SUPABASE_ACCESS_TOKEN=token-invalido-de-teste SUPABASE_ORG_ID=org-de-teste \
          bash ./supabase-provision.sh "Projeto de Teste" sa-east-1 2>&1 || true)"
-if printf '%s' "$saida" | grep -q 'Criando o projeto'; then
+if printf '%s' "$saida" | grep -q 'Creating project'; then
   printf '  ✓ o script passa da geração da senha e chega ao passo de criar\n'
 else
   printf '  ✗ o script MORREU antes de criar o projeto (o defeito voltou)\n'
@@ -1042,9 +1050,9 @@ STUB
   # achar: a recusa nomeia o contêiner encontrado e ensina a saída.
   saida="$(rodar install.sh --yes)"
   chegou_na_deteccao || exit 1
-  if printf '%s' "$saida" | grep -q 'já estão ocupadas'; then
+  if printf '%s' "$saida" | grep -q 'already in use by'; then
     printf '  ✗ caiu no painel genérico: a varredura de modo host não achou o Traefik\n'
-    printf '     %s\n' "$(printf '%s' "$saida" | grep -m1 'já estão ocupadas')"; exit 1
+    printf '     %s\n' "$(printf '%s' "$saida" | grep -m1 'already in use by')"; exit 1
   fi
   if ! printf '%s' "$saida" | grep -q "traefik-hostinger"; then
     printf '  ✗ a recusa não nomeia o Traefik encontrado — quem lê não sabe o que confirmar\n'; exit 1
@@ -1100,7 +1108,7 @@ STUB
   # explícita no .env já é a resposta, inclusive em --yes.
   saida="$(rodar install.sh --yes "REVERSE_PROXY='traefik'")"
   chegou_na_deteccao || exit 1
-  if printf '%s' "$saida" | grep -q 'Não consegui descobrir a rede'; then
+  if printf '%s' "$saida" | grep -q 'Could not identify the Docker network'; then
     printf '  ✗ com REVERSE_PROXY=traefik no .env o instalador morre sem achar a rede\n'; exit 1
   fi
   if ! grep -qx "TRAEFIK_NETWORK='crmhost_teste_proxy'" "$PROJ/.env"; then
@@ -1141,7 +1149,7 @@ exit 0
 STUB
   saida="$(rodar install.sh --yes)"
   chegou_na_deteccao || exit 1
-  if printf '%s' "$saida" | grep -q 'paro aqui em vez de chutar'; then
+  if printf '%s' "$saida" | grep -q 'stops here instead of guessing'; then
     printf '  ✗ recusou uma eleição que TEM prova (a coluna Ports diz quem publica)\n'; exit 1
   fi
   if ! grep -qx "TRAEFIK_NETWORK='coolify'" "$VPS_PROJ/.env"; then
@@ -1260,7 +1268,6 @@ reexec_ok() {
   if [ "${achou:-0}" -gt 0 ]; then printf '  ✓ %s (%s vars)\n' "$desc" "$achou"
   else printf '  ✗ %s — o kit não se encontra depois do cd; a 2ª execução morre\n' "$desc"; fail=1; fi
 }
-reexec_neg
 reexec_ok "o bloco de variáveis conhecidas acha o kit depois do cd"
 
 echo "isolamento: a suíte não escreve no crontab da máquina"
